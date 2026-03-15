@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "User Authentication and Access Control", "bloom": "Remembering", "statement": null, "value": null, "question": "What is the purpose of authentication?", "sample_answer": null, "choices": ["To encrypt data", "To verify user identity", "To update hardware", "To manage backups"], "answer": "B", "answer_text": "Authentication verifies user identity."}

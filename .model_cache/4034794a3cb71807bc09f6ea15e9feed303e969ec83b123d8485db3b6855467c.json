@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Computer Memory", "bloom": "Remembering", "statement": null, "value": null, "question": "Which type of memory is located in the CPU and used to hold frequently used data?", "sample_answer": null, "choices": ["RAM", "Cache", "Register", "Secondary"], "answer": "C", "answer_text": "Registers are located in the CPU and hold frequently used data."}

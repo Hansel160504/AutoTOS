@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "asd", "bloom": "Remembering", "statement": null, "value": null, "question": "Which protocol is used to send emails?", "sample_answer": null, "choices": ["HTTP", "HTTPS", "SMTP", "FTP"], "answer": "C", "answer_text": "SMTP is used for sending emails."}

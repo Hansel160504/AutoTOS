@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "d", "bloom": "Applying", "statement": null, "value": null, "question": "Which register holds the instruction that is being executed?", "sample_answer": null, "choices": ["Program Counter", "Instruction Register", "Accumulator", "Data Register"], "answer": "B", "answer_text": "The Instruction Register holds the instruction being executed."}

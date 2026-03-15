@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "da", "bloom": "Creating", "statement": null, "value": null, "question": "Which step occurs first during the SSL/TLS handshake?", "sample_answer": null, "choices": ["Server sends certificate", "Client sends client hello", "Server sends server hello", "Key exchange happens"], "answer": "B", "answer_text": "Client sends client hello first."}

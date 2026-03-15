@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Android Image Based", "bloom": "Applying", "statement": "ML models learn from labeled data in supervised learning.", "value": true, "answer": "true", "answer_text": "Supervised learning uses labeled data for training."}

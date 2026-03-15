@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Reference Model", "bloom": "Applying", "statement": null, "value": null, "question": "Which layer is responsible for breaking data into packets?", "sample_answer": null, "choices": ["Physical Layer", "Network Layer", "Transport Layer", "Application Layer"], "answer": "B", "answer_text": "The Network Layer breaks data into packets."}

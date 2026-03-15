@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "da", "bloom": "Creating", "statement": null, "value": null, "question": "Which attack involves sending packets from a false source address?", "sample_answer": null, "choices": ["Eavesdropping", "Spoofing", "Firewall blocking", "DDoS"], "answer": "Spoofing", "answer_text": "Spoofing involves sending packets from a false source address."}

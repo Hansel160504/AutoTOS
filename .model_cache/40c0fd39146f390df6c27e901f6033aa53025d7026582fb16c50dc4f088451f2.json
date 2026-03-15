@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Computer Memory", "bloom": "Remembering", "statement": "Registers are part of the main memory.", "value": false, "answer": "false", "answer_text": "Registers are not part of main memory; they are located in the CPU."}

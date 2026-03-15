@@ -1,0 +1,1 @@
+{"type": null, "concept": "Spoofing", "bloom": "Applying", "statement": null, "value": null, "question": "Which spoofing technique is used to redirect users to malicious websites?", "sample_answer": null, "choices": ["Wi-Fi spoofing", "DNS spoofing", "IP spoofing", "Email spoofing"], "answer": "B", "answer_text": "DNS spoofing redirects users to malicious websites."}

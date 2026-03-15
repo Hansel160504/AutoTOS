@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "IoT Security", "bloom": "Remembering", "statement": null, "value": null, "question": "What is a common vulnerability in IoT devices?", "sample_answer": null, "choices": ["Strong encryption", "Regular updates", "Weak authentication", "Network segmentation"], "answer": "C", "answer_text": "Weak authentication is common in IoT devices."}

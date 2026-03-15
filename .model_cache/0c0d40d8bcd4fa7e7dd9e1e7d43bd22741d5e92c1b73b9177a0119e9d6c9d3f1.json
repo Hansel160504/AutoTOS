@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "ad", "bloom": "Creating", "statement": "Digital signatures use a hash function before signing the message.", "value": true, "answer": "true", "answer_text": "Hashing ensures data integrity and efficiency in the signing process."}

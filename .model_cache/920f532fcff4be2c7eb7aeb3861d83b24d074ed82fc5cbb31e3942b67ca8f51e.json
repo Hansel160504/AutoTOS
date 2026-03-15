@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "HTTPS", "bloom": "Creating", "statement": null, "value": null, "question": "Design a simple HTTPS configuration for a small business website.", "sample_answer": "Enable TLS 1.2, disable outdated protocols, and use strong cipher suites.", "answer_text": null}

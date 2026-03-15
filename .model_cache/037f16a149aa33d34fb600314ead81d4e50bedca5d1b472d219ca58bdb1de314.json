@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Public Key Infrastructure", "bloom": "Applying", "statement": "PKI is used to verify digital signatures.", "value": true, "answer": "true", "answer_text": "PKI verifies digital signatures using public keys."}

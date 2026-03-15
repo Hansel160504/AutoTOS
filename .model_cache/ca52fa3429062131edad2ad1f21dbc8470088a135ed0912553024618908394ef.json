@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "ad", "bloom": "Applying", "statement": "Digital signatures are used to verify the authenticity and integrity of messages.", "value": true, "answer": "true", "answer_text": "They confirm identity and ensure data hasn't changed."}

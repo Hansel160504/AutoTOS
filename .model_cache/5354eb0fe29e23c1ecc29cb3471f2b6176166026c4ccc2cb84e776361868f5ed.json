@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "HTTPS", "bloom": "Creating", "statement": null, "value": null, "question": "How would you create a secure HTTPS connection between a client and server?", "sample_answer": "By using TLS protocols, exchanging keys, and validating certificates.", "answer_text": null}

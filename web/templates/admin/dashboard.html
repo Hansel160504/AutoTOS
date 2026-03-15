@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Dashboard – AutoTOS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --navy-deep:#111f33; --blue:#2563eb; --blue-light:#dbeafe;
+    --slate:#64748b; --slate-light:#f1f5f9; --border:#e2e8f0;
+    --text:#0f172a; --white:#fff;
+    --amber:#d97706; --amber-light:#fef3c7; --amber-border:#fcd34d;
+    --red:#dc2626; --red-light:#fee2e2;
+    --green:#16a34a; --green-light:#dcfce7;
+    --purple:#7c3aed; --purple-light:#ede9fe;
+    --radius:10px; --shadow:0 1px 4px rgba(0,0,0,.07);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--slate-light);color:var(--text);min-height:100vh}
+
+/* Header */
+header{background:var(--navy-deep);height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+.logo-mark{width:34px;height:34px;background:var(--red);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:17px;color:#fff}
+.logo-text{font-family:'DM Serif Display',serif;font-size:19px;color:#fff}
+.logo-text span{color:#f87171}
+.logo-badge{background:rgba(220,38,38,.2);border:1px solid rgba(248,113,113,.3);color:#fca5a5;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:20px}
+nav{display:flex;align-items:center;gap:2px}
+nav a{padding:6px 14px;border-radius:7px;text-decoration:none;font-size:13px;font-weight:500;color:#94a3b8;transition:background .15s,color .15s}
+nav a:hover{background:rgba(255,255,255,.08);color:#fff}
+nav a.active{background:rgba(220,38,38,.2);color:#fca5a5;font-weight:600}
+nav a.logout{border:1px solid rgba(255,255,255,.1);margin-left:6px}
+nav a.logout:hover{background:rgba(220,38,38,.15);color:#fca5a5}
+
+/* Page */
+.page{max-width:1200px;margin:0 auto;padding:28px 20px 60px}
+.page-hero{margin-bottom:24px}
+.page-hero h2{font-family:'DM Serif Display',serif;font-size:24px;color:var(--navy-deep);margin-bottom:4px}
+.page-hero p{font-size:13px;color:var(--slate)}
+
+/* Flash */
+.flash{padding:10px 14px;margin-bottom:14px;border-radius:8px;font-size:13px;font-weight:600}
+.flash.success{background:var(--green-light);color:var(--green)}
+.flash.error{background:var(--red-light);color:var(--red)}
+
+/* Stats */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:14px;margin-bottom:28px}
+.stat-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+.stat-card.blue::before   {background:var(--blue)}
+.stat-card.green::before  {background:var(--green)}
+.stat-card.amber::before  {background:var(--amber)}
+.stat-card.red::before    {background:var(--red)}
+.stat-card.purple::before {background:var(--purple)}
+.stat-card.ai-on::before  {background:var(--green)}
+.stat-card.ai-loc::before {background:var(--amber)}
+.stat-card.ai-off::before {background:var(--red)}
+.s-icon{font-size:22px;margin-bottom:10px}
+.s-val{font-family:'DM Serif Display',serif;font-size:28px;line-height:1;color:var(--navy-deep)}
+.s-label{font-size:11px;font-weight:700;color:var(--slate);margin-top:5px;text-transform:uppercase;letter-spacing:.4px}
+.s-sub{font-size:11px;color:var(--slate);margin-top:5px}
+.s-sub strong{color:var(--green)}
+
+/* Grid */
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:860px){.grid2{grid-template-columns:1fr}}
+
+/* Card */
+.card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-head h3{font-size:14px;font-weight:700;color:var(--navy-deep)}
+.card-head a{font-size:12px;color:var(--blue);text-decoration:none;font-weight:600}
+.card-head a:hover{text-decoration:underline}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+.badge.online  {background:var(--green-light);color:var(--green)}
+.badge.offline {background:var(--red-light);color:var(--red)}
+.badge.local   {background:var(--amber-light);color:var(--amber)}
+.badge.master  {background:var(--blue-light);color:var(--blue)}
+.badge.derived {background:var(--amber-light);color:var(--amber)}
+
+/* Recent */
+.rec-row{padding:13px 18px;border-bottom:1px solid #f1f5f9;transition:background .1s}
+.rec-row:last-child{border-bottom:none}
+.rec-row:hover{background:#fafbfd}
+.rec-line{display:flex;align-items:center;gap:8px}
+.rec-link{font-weight:700;font-size:13px;color:var(--blue);text-decoration:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rec-link:hover{text-decoration:underline}
+.rec-user{font-size:11px;color:var(--slate);white-space:nowrap}
+.rec-count{font-weight:700;font-size:12px;white-space:nowrap}
+.rec-date{font-size:11px;color:var(--slate);margin-top:3px}
+.derived-sub{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-left:14px;border-left:2px solid var(--amber-border)}
+.d-item{display:flex;align-items:center;gap:6px;font-size:11px}
+.d-name{color:var(--amber);font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-decoration:none}
+.d-name:hover{text-decoration:underline}
+.d-count{color:var(--slate);white-space:nowrap}
+
+/* Users */
+.user-row{display:flex;align-items:center;gap:12px;padding:11px 18px;border-bottom:1px solid #f1f5f9}
+.user-row:last-child{border-bottom:none}
+.avatar{width:34px;height:34px;border-radius:50%;background:var(--blue-light);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:var(--blue);flex-shrink:0}
+.u-info{flex:1;min-width:0}
+.u-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.u-email{font-size:11px;color:var(--slate)}
+.u-count{font-family:'DM Serif Display',serif;font-size:20px;color:var(--blue);min-width:36px;text-align:right}
+
+/* Model */
+.m-row{display:flex;justify-content:space-between;align-items:center;padding:9px 18px;border-bottom:1px solid #f1f5f9;font-size:13px}
+.m-row:last-child{border-bottom:none}
+.m-key{color:var(--slate);font-size:12px;font-weight:600}
+.m-val{font-weight:600;font-size:12px;max-width:200px;word-break:break-all;text-align:right}
+.v-green{color:var(--green)} .v-amber{color:var(--amber)} .v-blue{color:var(--blue)}
+
+/* Refresh btn */
+.refresh-btn{background:var(--slate-light);border:1px solid var(--border);border-radius:7px;padding:5px 12px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;color:var(--slate);cursor:pointer;transition:all .15s}
+.refresh-btn:hover{background:var(--border);color:var(--text)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinning{display:inline-block;animation:spin .8s linear infinite}
+
+.empty{text-align:center;color:var(--slate);padding:24px;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+    <a class="logo" href="{{ url_for('admin.index') }}">
+        <div class="logo-mark">A</div>
+        <div class="logo-text">Auto<span>TOS</span></div>
+        <span class="logo-badge">Admin</span>
+    </a>
+    <nav>
+        <a href="{{ url_for('admin.index') }}" class="active">Dashboard</a>
+        <a href="{{ url_for('admin.users') }}">Users</a>
+        <a href="{{ url_for('admin.records') }}">Records</a>
+        <a href="{{ url_for('auth.logout') }}" class="logout">Logout</a>
+    </nav>
+</header>
+
+<div class="page">
+    <div class="page-hero">
+        <h2>Admin Dashboard</h2>
+        <p>System overview — logged in as {{ current_user.name }}</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}{% for cat, msg in messages %}
+        <div class="flash {{ cat }}">{{ msg }}</div>
+      {% endfor %}{% endif %}
+    {% endwith %}
+
+    <div class="stats-grid">
+        <div class="stat-card blue">
+            <div class="s-icon">👥</div>
+            <div class="s-val">{{ total_users }}</div>
+            <div class="s-label">Total Users</div>
+            <div class="s-sub"><strong>+{{ new_users_week }}</strong> this week</div>
+        </div>
+        <div class="stat-card green">
+            <div class="s-icon">✅</div>
+            <div class="s-val">{{ active_users }}</div>
+            <div class="s-label">Active Users</div>
+            <div class="s-sub">{{ total_users - active_users }} inactive</div>
+        </div>
+        <div class="stat-card purple">
+            <div class="s-icon">🛡️</div>
+            <div class="s-val">{{ admin_users }}</div>
+            <div class="s-label">Admins</div>
+        </div>
+        <div class="stat-card blue">
+            <div class="s-icon">📋</div>
+            <div class="s-val">{{ master_records }}</div>
+            <div class="s-label">Master Banks</div>
+            <div class="s-sub"><strong>+{{ new_records_week }}</strong> this week</div>
+        </div>
+        <div class="stat-card amber">
+            <div class="s-icon">✂️</div>
+            <div class="s-val">{{ derived_records }}</div>
+            <div class="s-label">Derived Exams</div>
+        </div>
+        <div class="stat-card red">
+            <div class="s-icon">❓</div>
+            <div class="s-val">{{ "{:,}".format(total_items) }}</div>
+            <div class="s-label">Items Generated</div>
+        </div>
+        {% if model_health.status == 'online' %}{% set aic = 'ai-on' %}
+        {% elif model_health.status == 'local' %}{% set aic = 'ai-loc' %}
+        {% else %}{% set aic = 'ai-off' %}{% endif %}
+        <div class="stat-card {{ aic }}">
+            <div class="s-icon">🤖</div>
+            <div class="s-val" style="font-size:18px;margin-top:4px">{{ model_health.status|upper }}</div>
+            <div class="s-label">AI Status</div>
+            <div class="s-sub" style="word-break:break-all;font-size:10px">{{ model_health.url or '—' }}</div>
+        </div>
+    </div>
+
+    <div class="grid2">
+        <!-- Recent Generations -->
+        <div class="card">
+            <div class="card-head">
+                <h3>⏱ Recent Generations</h3>
+                <a href="{{ url_for('admin.records') }}">View all →</a>
+            </div>
+            {% for row in recent_records %}
+            {% set master = row[0] %}
+            <div class="rec-row">
+                <div class="rec-line">
+                    <a class="rec-link" href="{{ url_for('dashboard.view_tos', id=master.id) }}" title="{{ master.title }}">{{ master.title }}</a>
+                    <span class="badge master">Master</span>
+                    <span class="rec-count">{{ master.total_items }} items</span>
+                    <span class="rec-user">{{ row.user_name }}</span>
+                </div>
+                <div class="rec-date">{{ (master.date_created or '')[:10] }}</div>
+                {% if row.children %}
+                <div class="derived-sub">
+                    {% for child in row.children %}
+                    <div class="d-item">
+                        <span class="badge derived">✂</span>
+                        <a href="{{ url_for('dashboard.view_tos', id=child.id) }}" class="d-name" title="{{ child.title }}">{{ child.title }}</a>
+                        <span class="d-count">{{ child.total_items }} items · {{ (child.date_created or '')[:10] }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="empty">No records yet.</div>
+            {% endfor %}
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:18px">
+            <!-- Top Users -->
+            <div class="card">
+                <div class="card-head">
+                    <h3>🏆 Top Users</h3>
+                    <a href="{{ url_for('admin.users') }}">Manage →</a>
+                </div>
+                {% for row in top_users %}
+                <div class="user-row">
+                    <div class="avatar">{{ row.name[0].upper() }}</div>
+                    <div class="u-info">
+                        <div class="u-name">{{ row.name }}</div>
+                        <div class="u-email">{{ row.email }}</div>
+                    </div>
+                    <div class="u-count">{{ row.record_count or 0 }}</div>
+                </div>
+                {% else %}
+                <div class="empty">No users yet.</div>
+                {% endfor %}
+            </div>
+
+            <!-- AI Info -->
+            <div class="card">
+                <div class="card-head">
+                    <h3>🤖 AI Model Info</h3>
+                    <button class="refresh-btn" id="refreshBtn">↻ Refresh</button>
+                </div>
+                <div id="modelBody">
+                    {% set hs = model_health.status %}
+                    <div class="m-row"><span class="m-key">Status</span><span class="m-val"><span class="badge {{ 'online' if hs=='online' else ('local' if hs=='local' else 'offline') }}">{{ hs }}</span></span></div>
+                    <div class="m-row"><span class="m-key">Endpoint</span><span class="m-val">{{ model_health.url or '—' }}</span></div>
+                    {% if model_health.model_loaded is defined %}
+                    <div class="m-row"><span class="m-key">Loaded</span><span class="m-val {{ 'v-green' if model_health.model_loaded else '' }}">{{ '✅ Yes' if model_health.model_loaded else '❌ No' }}</span></div>
+                    {% endif %}
+                    <div class="m-row"><span class="m-key">Cache Hits</span><span class="m-val v-green">{{ cache_stats.get('cache_hits','—') }}</span></div>
+                    <div class="m-row"><span class="m-key">Cache Misses</span><span class="m-val v-amber">{{ cache_stats.get('cache_misses','—') }}</span></div>
+                    {% set tc = cache_stats.get('cache_hits',0) + cache_stats.get('cache_misses',0) %}
+                    {% if tc > 0 %}
+                    <div class="m-row"><span class="m-key">Hit Rate</span><span class="m-val v-blue">{{ "%.1f"|format(cache_stats.cache_hits/tc*100) }}%</span></div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('refreshBtn').addEventListener('click', async function(){
+    var btn = this;
+    var icon = document.createElement('span');
+    icon.className = 'spinning'; icon.textContent = '↻ ';
+    btn.disabled = true; btn.textContent = ''; btn.appendChild(icon); btn.append('Refreshing…');
+    try {
+        var d = await (await fetch("{{ url_for('admin.system_stats') }}")).json();
+        var h=d.model_health||{}, c=d.cache_stats||{};
+        var hits=c.cache_hits||0, misses=c.cache_misses||0, tot=hits+misses;
+        var sc=h.status==='online'?'online':(h.status==='local'?'local':'offline');
+        document.getElementById('modelBody').innerHTML=
+            '<div class="m-row"><span class="m-key">Status</span><span class="m-val"><span class="badge '+sc+'">'+( h.status||'offline')+'</span></span></div>'+
+            '<div class="m-row"><span class="m-key">Endpoint</span><span class="m-val">'+(h.url||'—')+'</span></div>'+
+            '<div class="m-row"><span class="m-key">Cache Hits</span><span class="m-val v-green">'+hits+'</span></div>'+
+            '<div class="m-row"><span class="m-key">Cache Misses</span><span class="m-val v-amber">'+misses+'</span></div>'+
+            (tot>0?'<div class="m-row"><span class="m-key">Hit Rate</span><span class="m-val v-blue">'+((hits/tot)*100).toFixed(1)+'%</span></div>':'');
+    } catch(e){ alert('Failed to refresh.'); }
+    btn.disabled=false; btn.textContent='↻ Refresh';
+});
+</script>
+</body>
+</html>

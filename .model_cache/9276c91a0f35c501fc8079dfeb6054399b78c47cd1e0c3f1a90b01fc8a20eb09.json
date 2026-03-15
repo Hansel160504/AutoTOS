@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Computer Memory", "bloom": "Applying", "statement": null, "value": null, "question": "Why is cache memory faster than primary memory?", "sample_answer": "Because it is located closer to the CPU and stores frequently accessed data.", "answer_text": "Rubric"}

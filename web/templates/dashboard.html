@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoTOS – Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --navy:        #1a2e4a;
+    --navy-deep:   #111f33;
+    --blue:        #2563eb;
+    --blue-light:  #dbeafe;
+    --blue-mid:    #3b82f6;
+    --slate:       #64748b;
+    --slate-light: #f1f5f9;
+    --border:      #e2e8f0;
+    --text:        #0f172a;
+    --white:       #ffffff;
+    --amber:       #d97706;
+    --amber-light: #fef3c7;
+    --amber-border:#fcd34d;
+    --green:       #16a34a;
+    --green-light: #dcfce7;
+    --red:         #dc2626;
+    --red-light:   #fee2e2;
+    --radius:      10px;
+    --shadow-sm:   0 1px 3px rgba(0,0,0,0.06);
+    --shadow-md:   0 4px 12px rgba(0,0,0,0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--slate-light);
+    color: var(--text);
+    min-height: 100vh;
+}
+
+/* ── Header ── */
+header {
+    background: var(--navy-deep);
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    position: sticky;
+    top: 0;
+    z-index: 200;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+}
+
+.header-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+}
+
+.header-logo-mark {
+    width: 34px; height: 34px;
+    background: var(--blue);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif;
+    font-size: 17px; color: white;
+    flex-shrink: 0;
+}
+
+.header-logo-text {
+    font-family: 'DM Serif Display', serif;
+    font-size: 19px; color: white; letter-spacing: -0.2px;
+}
+.header-logo-text span { color: #60a5fa; }
+
+header nav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+header nav a {
+    padding: 6px 14px;
+    border-radius: 7px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    color: #94a3b8;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+header nav a:hover { background: rgba(255,255,255,0.08); color: white; }
+header nav a.active { background: rgba(37,99,235,0.25); color: #93c5fd; font-weight: 600; }
+
+header nav a.nav-logout {
+    color: #94a3b8;
+    border: 1px solid rgba(255,255,255,0.12);
+    margin-left: 6px;
+}
+header nav a.nav-logout:hover {
+    background: rgba(220,38,38,0.15);
+    border-color: rgba(220,38,38,0.3);
+    color: #fca5a5;
+}
+
+/* ── Page wrapper ── */
+.page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 28px 20px 60px;
+}
+
+/* ── Page hero ── */
+.page-hero {
+    margin-bottom: 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.page-hero-text h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 26px;
+    color: var(--navy-deep);
+    letter-spacing: -0.3px;
+    margin-bottom: 4px;
+}
+
+.page-hero-text p {
+    font-size: 14px;
+    color: var(--slate);
+}
+
+.btn-create {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 18px;
+    background: var(--blue);
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s, box-shadow 0.15s;
+    box-shadow: 0 1px 4px rgba(37,99,235,0.25);
+    white-space: nowrap;
+}
+.btn-create:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.3); }
+
+/* ── Flash messages ── */
+.flash-msg {
+    padding: 11px 16px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.flash-msg.success { background: var(--green-light); color: var(--green);  border: 1px solid #bbf7d0; }
+.flash-msg.error   { background: var(--red-light);   color: var(--red);    border: 1px solid #fecaca; }
+
+/* ── Filter bar ── */
+.filter-bar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+
+.filter-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--slate);
+    white-space: nowrap;
+}
+
+.filter-bar input[type="text"],
+.filter-bar input[type="date"] {
+    padding: 7px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    color: var(--text);
+    background: var(--slate-light);
+    outline: none;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.filter-bar input[type="text"]  { min-width: 200px; flex: 1; }
+.filter-bar input[type="date"]  { width: 145px; }
+
+.filter-bar input:focus {
+    border-color: var(--blue);
+    background: var(--white);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+}
+
+.filter-clear {
+    background: none;
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    padding: 7px 12px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    color: var(--slate);
+    cursor: pointer;
+    font-weight: 600;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.filter-clear:hover { background: var(--slate-light); border-color: #cbd5e1; }
+
+.filter-results {
+    font-size: 12px;
+    color: var(--slate);
+    margin-left: auto;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+/* ── Table card ── */
+.table-card {
+    background: var(--white);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+thead th {
+    padding: 11px 16px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #f8fafc;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    color: var(--slate);
+}
+
+thead th.col-master  { color: var(--blue); }
+thead th.col-derived { color: var(--amber); }
+
+tbody tr {
+    border-bottom: 1px solid #f1f5f9;
+    transition: background 0.1s;
+}
+
+tbody tr:last-child { border-bottom: none; }
+tbody tr:hover { background: #f8fafc; }
+
+tbody td {
+    padding: 14px 16px;
+    vertical-align: middle;
+    font-size: 13px;
+}
+
+/* Date cell */
+.date-primary { font-size: 13px; color: var(--text); font-weight: 500; }
+.date-sub { font-size: 11px; color: var(--slate); margin-top: 2px; }
+
+/* Master cell */
+.master-cell { display: flex; align-items: center; gap: 12px; }
+.master-info { flex: 1; }
+
+.record-title {
+    font-weight: 600;
+    color: var(--navy-deep);
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.record-meta { font-size: 11px; color: var(--slate); margin-top: 3px; }
+
+/* Derived cell */
+.derived-cell { display: flex; flex-direction: column; gap: 6px; }
+
+.derived-entry {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 11px;
+    background: #fffbeb;
+    border: 1px solid var(--amber-border);
+    border-left: 3px solid var(--amber);
+    border-radius: 7px;
+    transition: background 0.1s;
+}
+.derived-entry:hover { background: #fef9c3; }
+
+.derived-info { flex: 1; min-width: 0; }
+.derived-name { font-weight: 600; font-size: 12px; color: var(--navy); }
+.derived-meta { font-size: 11px; color: var(--amber); margin-top: 2px; }
+
+.no-derived {
+    font-size: 12px;
+    color: #cbd5e1;
+    font-style: italic;
+    padding: 2px 0;
+}
+
+/* Badges */
+.badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.badge.master  { background: var(--blue-light);  color: var(--blue);  border: 1px solid #bfdbfe; }
+.badge.derived { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-border); }
+
+/* Action buttons */
+.btn-view {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 13px;
+    background: var(--blue);
+    color: white;
+    border: none;
+    border-radius: 7px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+.btn-view:hover { background: #1d4ed8; }
+
+.btn-view-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+
+.btn-delete {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 13px;
+    background: var(--white);
+    color: var(--red);
+    border: 1.5px solid #fecaca;
+    border-radius: 7px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+.btn-delete:hover { background: var(--red-light); border-color: #fca5a5; }
+
+/* Row num */
+.row-num { color: #cbd5e1; font-size: 12px; font-weight: 500; }
+
+/* Empty state */
+.empty-state {
+    text-align: center;
+    padding: 56px 20px;
+}
+.empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.4; }
+.empty-title { font-family: 'DM Serif Display', serif; font-size: 20px; color: var(--navy); margin-bottom: 6px; }
+.empty-sub   { font-size: 14px; color: var(--slate); margin-bottom: 20px; }
+
+/* ── Pagination ── */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.pagination button {
+    padding: 6px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 7px;
+    background: var(--white);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+    min-width: 36px;
+}
+
+.pagination button:hover:not(:disabled) {
+    background: var(--blue-light);
+    border-color: #93c5fd;
+    color: var(--blue);
+}
+
+.pagination button.active {
+    background: var(--blue);
+    color: white;
+    border-color: var(--blue);
+}
+
+.pagination button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.page-info {
+    font-size: 12px;
+    color: var(--slate);
+    padding: 0 10px;
+    font-weight: 500;
+}
+
+.no-results {
+    text-align: center;
+    padding: 32px;
+    color: #94a3b8;
+    font-style: italic;
+    font-size: 14px;
+}
+
+/* Page animation */
+.page { animation: fadeIn 0.3s ease both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Responsive */
+@media (max-width: 700px) {
+    .master-cell, .derived-entry { flex-direction: column; align-items: flex-start; }
+    .filter-bar { flex-direction: column; align-items: stretch; }
+    .filter-results { margin-left: 0; }
+    header nav a { padding: 6px 8px; font-size: 12px; }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <a class="header-logo" href="/dashboard/">
+        <div class="header-logo-mark">A</div>
+        <div class="header-logo-text">Auto<span>TOS</span></div>
+    </a>
+    <nav>
+        <a href="/dashboard/"       class="nav-link active">Dashboard</a>
+        <a href="/dashboard/create" class="nav-link">Create TOS</a>
+        <a href="/logout"           class="nav-link nav-logout">Logout</a>
+    </nav>
+</header>
+
+<div class="page">
+
+    <div class="page-hero">
+        <div class="page-hero-text">
+            <h2>Welcome, {{ current_user.name }}!</h2>
+            <p>Manage your Table of Specifications and generated exams.</p>
+        </div>
+        <a href="/dashboard/create" class="btn-create">
+            ＋ Create New TOS
+        </a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-msg {{ category }}">
+            {{ '✓' if category == 'success' else '⚠' }} {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label for="filter-title">🔍 Title</label>
+            <input type="text" id="filter-title" placeholder="Search by title…" autocomplete="off">
+        </div>
+        <div class="filter-group">
+            <label for="filter-date-from">📅 From</label>
+            <input type="date" id="filter-date-from">
+        </div>
+        <div class="filter-group">
+            <label for="filter-date-to">To</label>
+            <input type="date" id="filter-date-to">
+        </div>
+        <button class="filter-clear" id="filter-clear-btn">✕ Clear</button>
+        <span class="filter-results" id="filter-results-count"></span>
+    </div>
+
+    {% set master_records  = records | selectattr('is_derived', 'equalto', False) | list %}
+    {% set derived_records = records | selectattr('is_derived', 'equalto', True)  | list %}
+
+    {% set ns = namespace(map={}) %}
+    {% for d in derived_records %}
+        {% set pid = d.parent_id | string %}
+        {% if pid in ns.map %}
+            {% set _ = ns.map.update({ pid: ns.map[pid] + [d] }) %}
+        {% else %}
+            {% set _ = ns.map.update({ pid: [d] }) %}
+        {% endif %}
+    {% endfor %}
+
+    <div class="table-card">
+        {% if master_records | length == 0 %}
+        <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <div class="empty-title">No records yet</div>
+            <div class="empty-sub">Create your first Table of Specification to get started.</div>
+            <a href="/dashboard/create" class="btn-create">＋ Create New TOS</a>
+        </div>
+        {% else %}
+        <table id="tos-table">
+            <thead>
+                <tr>
+                    <th style="width:4%;">#</th>
+                    <th style="width:18%;">Date Created</th>
+                    <th class="col-master"  style="width:32%;">⊞ Master Bank</th>
+                    <th class="col-derived" style="width:36%;">✂ Derived Exam(s)</th>
+                    <th style="width:10%;">Action</th>
+                </tr>
+            </thead>
+            <tbody id="tos-tbody">
+                {% for r in master_records %}
+                {% set children = ns.map.get(r.id | string, []) %}
+                <tr class="tos-row"
+                    data-title="{{ r.title | lower }}"
+                    data-date="{{ r.date_created[:10] }}">
+
+                    <td class="row-num">{{ loop.index }}</td>
+
+                    <td>
+                        <div class="date-primary">{{ r.date_created[:10] }}</div>
+                        <div class="date-sub">
+                            {{ r.total_items }} item{% if r.total_items != 1 %}s{% endif %}
+                        </div>
+                    </td>
+
+                    <td>
+                        <div class="master-cell">
+                            <div class="master-info">
+                                <div class="record-title">
+                                    {{ r.title }}
+                                    <span class="badge master">Master</span>
+                                </div>
+                                <div class="record-meta">
+                                    {{ children | length }} derived exam{% if children | length != 1 %}s{% endif %}
+                                </div>
+                            </div>
+                            <a href="{{ url_for('dashboard.view_tos', id=r.id) }}" class="btn-view">
+                                View
+                            </a>
+                        </div>
+                    </td>
+
+                    <td>
+                        {% if children %}
+                        <div class="derived-cell">
+                            {% for child in children %}
+                            <div class="derived-entry">
+                                <div class="derived-info">
+                                    <div class="derived-name">
+                                        {{ child.title }}
+                                        <span class="badge derived">Derived</span>
+                                    </div>
+                                    <div class="derived-meta">
+                                        {{ child.total_items }} of {{ r.total_items }} items
+                                        ({{ ((child.total_items / r.total_items) * 100) | round(1) }}%)
+                                        · {{ child.date_created[:10] }}
+                                    </div>
+                                </div>
+                                <a href="{{ url_for('dashboard.view_tos', id=child.id) }}"
+                                   class="btn-view btn-view-sm">View</a>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="no-derived">
+                            No derived exams yet — use <em>Save Selected</em> inside the master.
+                        </div>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <a href="{{ url_for('dashboard.delete_tos', id=r.id) }}"
+                           class="btn-delete"
+                           onclick="return confirm('Delete \'{{ r.title }}\' and all {{ children | length }} derived exam(s)?');">
+                            Delete
+                        </a>
+                    </td>
+
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="no-results" id="no-results-msg" style="display:none;">
+            No records match your filters.
+        </div>
+
+        <div class="pagination" id="pagination-controls"></div>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+(function () {
+    var PER_PAGE    = 10;
+    var currentPage = 1;
+    var filtered    = [];
+
+    var allRows      = Array.from(document.querySelectorAll('#tos-tbody .tos-row'));
+    var noResultsMsg = document.getElementById('no-results-msg');
+    var pagControls  = document.getElementById('pagination-controls');
+    var resultCount  = document.getElementById('filter-results-count');
+    var titleInput   = document.getElementById('filter-title');
+    var dateFrom     = document.getElementById('filter-date-from');
+    var dateTo       = document.getElementById('filter-date-to');
+    var clearBtn     = document.getElementById('filter-clear-btn');
+
+    if (!allRows.length) return;
+
+    function applyFilter() {
+        var q    = (titleInput.value || '').trim().toLowerCase();
+        var from = dateFrom.value || '';
+        var to   = dateTo.value   || '';
+        filtered = [];
+        allRows.forEach(function (row, i) {
+            var mt = !q    || (row.dataset.title || '').includes(q);
+            var mf = !from || (row.dataset.date  || '') >= from;
+            var ml = !to   || (row.dataset.date  || '') <= to;
+            if (mt && mf && ml) filtered.push(i);
+        });
+        currentPage = 1;
+        render();
+    }
+
+    function render() {
+        var total      = filtered.length;
+        var totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+        if (currentPage > totalPages) currentPage = totalPages;
+
+        var start   = (currentPage - 1) * PER_PAGE;
+        var pageSet = new Set(filtered.slice(start, start + PER_PAGE));
+        var visNum  = start + 1;
+
+        allRows.forEach(function (row, i) {
+            if (pageSet.has(i)) {
+                row.style.display = '';
+                row.querySelector('.row-num').textContent = visNum++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        noResultsMsg.style.display = total === 0 ? 'block' : 'none';
+
+        var hasFilter = titleInput.value.trim() || dateFrom.value || dateTo.value;
+        resultCount.textContent = hasFilter
+            ? total + ' record' + (total !== 1 ? 's' : '') + ' found'
+            : '';
+
+        buildPagination(totalPages, total);
+    }
+
+    function buildPagination(totalPages, total) {
+        pagControls.innerHTML = '';
+        if (totalPages <= 1) return;
+
+        var visStart = (currentPage - 1) * PER_PAGE + 1;
+        var visEnd   = Math.min(currentPage * PER_PAGE, total);
+
+        var prev = mkBtn('‹ Prev', currentPage === 1);
+        prev.addEventListener('click', function () { currentPage--; render(); });
+        pagControls.appendChild(prev);
+
+        var W = 5;
+        var ws = Math.max(1, currentPage - Math.floor(W / 2));
+        var we = ws + W - 1;
+        if (we > totalPages) { we = totalPages; ws = Math.max(1, we - W + 1); }
+
+        if (ws > 1) {
+            pagControls.appendChild(mkPageBtn(1));
+            if (ws > 2) pagControls.appendChild(mkEllipsis());
+        }
+        for (var p = ws; p <= we; p++) pagControls.appendChild(mkPageBtn(p));
+        if (we < totalPages) {
+            if (we < totalPages - 1) pagControls.appendChild(mkEllipsis());
+            pagControls.appendChild(mkPageBtn(totalPages));
+        }
+
+        var next = mkBtn('Next ›', currentPage === totalPages);
+        next.addEventListener('click', function () { currentPage++; render(); });
+        pagControls.appendChild(next);
+
+        var info = document.createElement('span');
+        info.className   = 'page-info';
+        info.textContent = visStart + '–' + visEnd + ' of ' + total;
+        pagControls.appendChild(info);
+    }
+
+    function mkBtn(label, disabled) {
+        var b = document.createElement('button');
+        b.textContent = label;
+        b.disabled    = disabled;
+        return b;
+    }
+
+    function mkPageBtn(p) {
+        var b = mkBtn(p, false);
+        if (p === currentPage) b.classList.add('active');
+        b.addEventListener('click', function () { currentPage = p; render(); });
+        return b;
+    }
+
+    function mkEllipsis() {
+        var s = document.createElement('span');
+        s.textContent   = '…';
+        s.style.cssText = 'padding:0 4px; color:#94a3b8; font-size:14px; line-height:34px;';
+        return s;
+    }
+
+    titleInput.addEventListener('input',  applyFilter);
+    dateFrom.addEventListener('change',   applyFilter);
+    dateTo.addEventListener('change',     applyFilter);
+    clearBtn.addEventListener('click', function () {
+        titleInput.value = '';
+        dateFrom.value   = '';
+        dateTo.value     = '';
+        applyFilter();
+    });
+
+    applyFilter();
+})();
+</script>
+
+</body>
+</html>

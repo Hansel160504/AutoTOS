@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Domain", "bloom": "Applying", "statement": null, "value": null, "question": "Which URL format is used when the protocol and server are omitted?", "sample_answer": null, "choices": ["Relative URL", "Absolute URL", "IP URL", "FTP URL"], "answer": "A", "answer_text": "Relative URL is used when protocol and server are omitted."}

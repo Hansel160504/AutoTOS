@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "ada", "bloom": "Remembering", "statement": null, "value": null, "question": "Which firewall type checks packet headers only?", "sample_answer": null, "choices": ["Stateful Inspection", "Application Layer", "Packet-Filtering", "Next-Generation"], "answer": "C", "answer_text": "Packet-filtering firewalls check only packet headers."}

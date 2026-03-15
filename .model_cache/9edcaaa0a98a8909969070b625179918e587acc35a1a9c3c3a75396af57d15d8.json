@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "asd", "bloom": "Remembering", "statement": null, "value": null, "question": "What does the domain name system help with?", "sample_answer": null, "choices": ["Encrypting messages", "Resolving host names to IP addresses", "Deleting files", "Connecting devices"], "answer": "B", "answer_text": "The DNS system helps resolve host names into IP addresses."}

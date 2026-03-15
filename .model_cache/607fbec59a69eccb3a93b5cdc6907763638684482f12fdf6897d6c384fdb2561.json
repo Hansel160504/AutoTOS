@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "HTTPS", "bloom": "Creating", "statement": null, "value": null, "question": "How would you create a secure HTTPS connection using TLS 1.3?", "sample_answer": "By configuring the server to support only TLS 1.3, enabling strong cipher suites, and validating certificates.", "answer_text": null}

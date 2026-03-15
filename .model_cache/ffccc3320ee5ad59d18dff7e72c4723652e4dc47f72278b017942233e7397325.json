@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Domain", "bloom": "Applying", "statement": null, "value": null, "question": "Which protocol is used to create an absolute URL?", "sample_answer": null, "choices": ["FTP", "HTTP", "Gopher", "Mailto"], "answer": "B", "answer_text": "HTTP is used to create an absolute URL."}

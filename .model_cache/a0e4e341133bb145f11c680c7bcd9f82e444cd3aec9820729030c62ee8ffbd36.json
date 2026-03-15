@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "User Authentication and Access Control", "bloom": "Creating", "statement": null, "value": null, "question": "Design a secure multi-factor authentication system for a financial institution.", "sample_answer": "The system should require a password, a one-time token, and biometric verification.", "answer_text": null}

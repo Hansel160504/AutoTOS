@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "User Authentication and Access Control", "bloom": "Creating", "statement": null, "value": null, "question": "Design a secure authentication system using at least two methods.", "sample_answer": "Combine a password with a token to require two forms of authentication.", "answer_text": null}

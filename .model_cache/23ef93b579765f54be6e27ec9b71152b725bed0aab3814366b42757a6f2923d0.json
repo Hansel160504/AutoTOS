@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "ada", "bloom": "Applying", "statement": "A firewall can inspect the entire content of a packet.", "value": false, "answer": "false", "answer_text": "Firewalls can inspect headers, but only deeper inspection systems like NGFW inspect content."}

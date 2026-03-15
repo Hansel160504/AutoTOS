@@ -1,0 +1,20 @@
+# Exclude huge model files
+models/
+*.gguf
+*.bin
+*.safetensors
+
+# Exclude venv
+venv/
+
+# Exclude web packages (not needed for ai build)
+web_packages/
+
+# Exclude uploads
+uploads/
+
+# Exclude cache
+.extracted_cache/
+.model_cache/
+__pycache__/
+*.pyc

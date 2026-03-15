@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Domain", "bloom": "Creating", "statement": null, "value": null, "question": "Which URL type includes the protocol and server name?", "sample_answer": null, "choices": ["Relative URL", "Absolute URL", "File URL", "Image URL"], "answer": "B", "answer_text": "Absolute URL includes protocol and server name."}

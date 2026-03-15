@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Domain", "bloom": "Remembering", "statement": null, "value": null, "question": "What is the purpose of DNS?", "sample_answer": null, "choices": ["To store video files", "To translate domain names into IP addresses", "To delete emails", "To encrypt messages"], "answer": "B", "answer_text": "DNS translates domain names into IP addresses."}

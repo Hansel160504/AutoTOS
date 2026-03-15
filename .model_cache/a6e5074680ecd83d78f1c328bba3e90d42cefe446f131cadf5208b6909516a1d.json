@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Public Key Infrastructure", "bloom": "Creating", "statement": null, "value": null, "question": "Design a simple PKI system for a small business.", "sample_answer": "The business uses a local CA to issue certificates.", "answer_text": null}

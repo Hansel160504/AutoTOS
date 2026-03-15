@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Malware", "bloom": "Creating", "statement": null, "value": null, "question": "Create a short description of a new type of malware that could be used for financial gain.", "sample_answer": "A worm that spreads by sending messages with fake bank alerts.", "answer_text": null}

@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Malware", "bloom": "Creating", "statement": null, "value": null, "question": "Design a new type of malware that spreads through public Wi-Fi and collects personal data.", "sample_answer": "A Wi-Fi spy malware that monitors passwords and browsing activity.", "answer_text": null}

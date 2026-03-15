@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Operating System", "bloom": "Applying", "statement": null, "value": null, "question": "How does an operating system manage memory for running applications?", "sample_answer": "It allocates and deallocates memory based on program requirements.", "answer_text": null}

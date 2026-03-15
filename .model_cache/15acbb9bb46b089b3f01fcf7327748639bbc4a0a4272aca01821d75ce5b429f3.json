@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Internet Domain", "bloom": "Applying", "statement": null, "value": null, "question": "Which type of URL is used for internal links within a website?", "sample_answer": null, "choices": ["Relative URL", "Absolute URL", "FTP URL", "HTTPS URL"], "answer": "A", "answer_text": "Relative URLs are used for internal links."}

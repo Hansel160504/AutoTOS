@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "User Authentication and Access Control", "bloom": "Applying", "statement": null, "value": null, "question": "Which authentication method uses a physical device like a token?", "sample_answer": null, "choices": ["Password", "Biometric scan", "Smart card", "PIN"], "answer": "C", "answer_text": "Smart cards are physical devices used for authentication."}

@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pydantic
+starlette
+python-multipart
+pymupdf
+python-docx
+python-pptx
+llama-cpp-python

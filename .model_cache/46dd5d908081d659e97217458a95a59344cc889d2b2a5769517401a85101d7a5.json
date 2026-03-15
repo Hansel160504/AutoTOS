@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "Internet Reference Model", "bloom": "Creating", "statement": null, "value": null, "question": "Design a communication system using the OSI model.", "sample_answer": "It would use physical, data link, network, transport, session, presentation, and application layers.", "answer_text": null}

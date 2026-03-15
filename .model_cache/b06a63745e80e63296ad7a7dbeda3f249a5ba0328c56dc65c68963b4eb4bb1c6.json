@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Computer Memory", "bloom": "Remembering", "statement": null, "value": null, "question": "Which type of memory is located in the CPU and holds data for immediate processing?", "sample_answer": null, "choices": ["RAM", "Cache", "Secondary Storage", "Hard Disk"], "answer": "B", "answer_text": "Cache memory is located in the CPU."}

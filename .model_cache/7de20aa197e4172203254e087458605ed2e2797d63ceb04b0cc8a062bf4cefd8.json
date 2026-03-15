@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "aw", "bloom": "Creating", "statement": "A switch distributes messages to all connected devices.", "value": false, "answer": "false", "answer_text": "A switch sends messages directly, not to all devices."}

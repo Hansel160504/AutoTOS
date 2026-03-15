@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "IoT Security Challenges", "bloom": "Creating", "statement": null, "value": null, "question": "What is a security risk associated with IoT devices?", "sample_answer": null, "choices": ["Strong authentication", "Insecure network services", "Frequent updates", "Data encryption"], "answer": "B", "answer_text": "Insecure network services are a major risk."}

@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "asd", "bloom": "Creating", "statement": "A relative URL includes the protocol and server name.", "value": false, "answer": "false", "answer_text": "A relative URL omits the protocol and server name."}

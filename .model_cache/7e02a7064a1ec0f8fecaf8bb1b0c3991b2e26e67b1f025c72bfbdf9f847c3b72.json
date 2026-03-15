@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Operating System", "bloom": "Applying", "statement": null, "value": null, "question": "Which OS function is responsible for managing memory allocation?", "sample_answer": null, "choices": ["Device management", "Memory management", "Processor scheduling", "File compression"], "answer": "B", "answer_text": "Memory management handles memory allocation."}

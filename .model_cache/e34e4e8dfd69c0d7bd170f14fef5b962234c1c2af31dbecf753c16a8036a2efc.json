@@ -1,0 +1,1 @@
+{"type": "openended", "concept": "dad", "bloom": "Creating", "statement": null, "value": null, "question": "Create a URL for accessing a file named 'report.pdf' on a server named 'example.com' using the 'https' protocol.", "sample_answer": "https://example.com/report.pdf", "answer_text": null}

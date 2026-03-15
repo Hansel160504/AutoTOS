@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "Public Key Infrastructure", "bloom": "Remembering", "statement": null, "value": null, "question": "Which component issues digital certificates?", "sample_answer": null, "choices": ["User device", "Certificate Authority", "Firewall", "Router"], "answer": "B", "answer_text": "The Certificate Authority issues certificates."}

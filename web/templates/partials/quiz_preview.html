@@ -1,0 +1,265 @@
+{# templates/partials/quiz_preview.html #}
+<style>
+#quiz-preview-card {
+  box-sizing: border-box;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  color: #0f172a;
+}
+#quiz-preview-card .pv-header {
+  text-align: center; margin-bottom: 18px;
+  padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;
+}
+#quiz-preview-card .pv-header h2 {
+  font-family: 'DM Serif Display', serif;
+  font-size: 22px; font-weight: 400; color: #111f33; margin-bottom: 6px;
+}
+#quiz-preview-card .pv-meta { font-size: 13px; color: #64748b; }
+
+.pv-section-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.5px; color: #64748b; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+.pv-section-label::after { content:''; flex:1; height:1px; background:#e2e8f0; }  
+
+.pv-test-header {
+  font-family: 'DM Serif Display', serif;
+  font-size: 18px; color: #2563eb;
+  margin-top: 28px; margin-bottom: 4px;
+  border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;
+}
+.pv-test-desc { font-size: 13px; color: #64748b; font-style: italic; margin-bottom: 16px; }
+
+.spec-table { width:100%; border-collapse:collapse; margin:12px 0 24px; font-size:13px; }
+.spec-table th, .spec-table td {
+  border:1px solid #e2e8f0; padding:8px 10px; text-align:left; vertical-align:middle;
+}
+.spec-table thead th { background:#f8fafc; font-weight:700; font-size:12px; }
+.spec-table .small  { font-size:12px; color:#64748b; }
+.spec-table .center { text-align:center; }
+.spec-table .right  { text-align:right; }
+
+.pv-toolbar {
+  display:flex; align-items:center; gap:8px;
+  margin:16px 0 10px; padding:8px 12px;
+  background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; font-size:13px;
+}
+.pv-toolbar button {
+  background:#fff; border:1.5px solid #e2e8f0; border-radius:7px;
+  padding:5px 12px; cursor:pointer;
+  font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#1a2e4a;
+  transition:background 0.15s, border-color 0.15s;
+}
+.pv-toolbar button:hover { background:#dbeafe; border-color:#93c5fd; color:#2563eb; }
+#preview-selected-count { margin-left:auto; color:#2563eb; font-weight:700; font-size:13px; }
+
+#quiz-preview-card ol.questions { margin:0; padding-left:20px; }
+#quiz-preview-card ol.questions > li {
+  margin-bottom:22px; line-height:1.5; border-radius:7px;
+  transition:background 0.12s, box-shadow 0.12s;
+}
+#quiz-preview-card ol.questions > li.q-selected {
+  background:#eff6ff; box-shadow:inset 3px 0 0 #2563eb; padding-left:10px;
+}
+.question-item-wrapper { display:flex; align-items:flex-start; gap:10px; }
+.question-select-cb {
+  margin-top:3px; flex-shrink:0;
+  width:16px; height:16px; cursor:pointer; accent-color:#2563eb;
+}
+.question-item-body { flex:1; min-width:0; }
+.q-meta {
+  font-size:10px; font-weight:700; text-transform:uppercase;
+  letter-spacing:0.4px; color:#94a3b8; margin-bottom:5px;
+}
+.q-text { font-size:14px; color:#0f172a; margin-bottom:10px; font-weight:500; }
+.choices { list-style:none; padding:0; margin:0 0 10px; display:flex; flex-direction:column; gap:5px; }
+.choices li { padding:7px 12px; border-radius:7px; background:#f8fafc; border:1px solid #e2e8f0; font-size:13px; }
+.choices li.correct { background:#f0fdf4; border-color:#86efac; color:#14532d; font-weight:600; }
+.tf-note { font-size:13px; color:#64748b; font-style:italic; margin-bottom:10px; }
+.answer-block {
+  font-size:13px; color:#0f172a;
+  background:#f0fdf4; padding:10px 14px;
+  border-left:3px solid #16a34a; border-radius:6px;
+}
+.answer-block .answer-text { font-size:12px; color:#64748b; margin-top:4px; }
+
+.pv-actions {
+  display:flex; gap:10px; justify-content:center;
+  margin-top:28px; padding-top:20px; border-top:1px solid #e2e8f0; flex-wrap:wrap;
+}
+.pv-actions button {
+  padding:10px 22px; border-radius:8px;
+  font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600;
+  cursor:pointer; transition:background 0.15s; border:none;
+}
+#quiz-preview-save          { background:#2563eb; color:#fff; }
+#quiz-preview-save:hover    { background:#1d4ed8; }
+#quiz-preview-save-selected { background:#d97706; color:#fff; }
+#quiz-preview-save-selected:hover    { background:#b45309; }
+#quiz-preview-save-selected:disabled {
+  background:#e2e8f0 !important; color:#94a3b8 !important; cursor:not-allowed !important;
+}
+#quiz-preview-close       { background:#f1f5f9; color:#64748b; border:1.5px solid #e2e8f0 !important; }
+#quiz-preview-close:hover { background:#e2e8f0; }
+
+@media (max-width:900px) { .spec-table th,.spec-table td { font-size:11px; padding:5px; } }
+</style>
+
+<div id="quiz-preview-card" role="region" aria-label="Quiz preview">
+
+  <div class="pv-header">
+    <h2>{{ title or "Generated Quiz" }}</h2>
+    <div class="pv-meta">
+      {% if subject_type %}
+        <span>{{ subject_type.replace('nonlab','Non-Laboratory').replace('lab','Laboratory') }}</span>
+        &nbsp;·&nbsp;
+      {% endif %}
+      {{ total_items or (quizzes|length) }} items total
+    </div>
+  </div>
+
+  {% set fam_pct = fam_pct if fam_pct is not none else 50 %}
+  {% set int_pct = int_pct if int_pct is not none else 30 %}
+  {% set cre_pct = cre_pct if cre_pct is not none else 20 %}
+
+  <div class="pv-section-label">Table of Specification</div>
+  <div style="font-size:12px; color:#64748b; margin-bottom:8px;">
+    FAM {{ fam_pct }}% &nbsp;/&nbsp; INT {{ int_pct }}% &nbsp;/&nbsp; CRE {{ cre_pct }}%
+  </div>
+
+  <table class="spec-table" role="table" aria-label="Table of specification">
+    <thead>
+      <tr>
+        <th rowspan="2" style="width:28%; vertical-align:middle;">CONTENT OUTLINE / TOPIC</th>
+        <th rowspan="2" class="center" style="width:8%; vertical-align:middle;">Hours</th>
+        <th class="center" colspan="2">FAMILIARIZATION<br><span class="small">(Remembering/Understanding)</span><br><span class="small" style="font-style:italic;">{{ fam_pct }}%</span></th>
+        <th class="center" colspan="2">INTEGRATION<br><span class="small">(Applying/Analyzing)</span><br><span class="small" style="font-style:italic;">{{ int_pct }}%</span></th>
+        <th class="center" colspan="2">CREATION<br><span class="small">(Evaluating/Creating)</span><br><span class="small" style="font-style:italic;">{{ cre_pct }}%</span></th>
+        <th rowspan="2" class="center" style="width:7%; vertical-align:middle;">TOTAL</th>
+      </tr>
+      <tr>
+        <th class="center small">Items</th>
+        <th class="center small">Range</th>
+        <th class="center small">Items</th>
+        <th class="center small">Range</th>
+        <th class="center small">Items</th>
+        <th class="center small">Range</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% set totals = namespace(hrs=0, fam=0, intg=0, cre=0, total_items=0) %}
+      {% for t in topics %}
+        {% set totals.hrs        = totals.hrs        + (t.hours or 0) %}
+        {% set totals.fam        = totals.fam        + (t.fam   or 0) %}
+        {% set totals.intg       = totals.intg       + (t.int   or 0) %}
+        {% set totals.cre        = totals.cre        + (t.cre   or 0) %}
+        {% set totals.total_items = totals.total_items + (t['items'] or t['quiz_items'] or 0) %}
+        <tr>
+          <td>
+            <strong>{{ t.topic }}</strong>
+            {% if t.learn_material %}
+              <div style="font-size:11px; color:#777; font-style:italic; margin-top:3px;">
+                Material: {{ t.learn_material[:100] }}{% if t.learn_material|length > 100 %}...{% endif %}
+              </div>
+            {% endif %}
+          </td>
+          <td class="center">{{ t.hours }}</td>
+          <td class="center">{{ t.fam or 0 }}</td>
+          <td class="center small">{{ t.fam_range or '' }}</td>
+          <td class="center">{{ t.int or 0 }}</td>
+          <td class="center small">{{ t.int_range or '' }}</td>
+          <td class="center">{{ t.cre or 0 }}</td>
+          <td class="center small">{{ t.cre_range or '' }}</td>
+          <td class="center">{{ t['items'] or t['quiz_items'] or 0 }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr style="font-weight:700; background:#f8fafc;">
+        <td class="right">TOTAL</td>
+        <td class="center">{{ totals.hrs }}</td>
+        <td class="center">{{ totals.fam }}</td><td class="center small"></td>
+        <td class="center">{{ totals.intg }}</td><td class="center small"></td>
+        <td class="center">{{ totals.cre }}</td><td class="center small"></td>
+        <td class="center">{{ totals.total_items }}</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="pv-section-label">Quiz Items</div>
+  <div class="pv-toolbar" role="toolbar" aria-label="Question selection tools">
+    <button id="preview-select-all-btn"   type="button">☑ Select All</button>
+    <button id="preview-deselect-all-btn" type="button">☐ Deselect All</button>
+    <span   id="preview-selected-count">0 selected</span>
+  </div>
+
+  <ol class="questions" aria-live="polite">
+    {% for q in quizzes %}
+
+      {% if q.test_header and (loop.first or q.test_header != quizzes[loop.index0 - 1].test_header) %}
+        <div style="margin-top:32px; margin-bottom:16px;">
+          <h3 class="pv-test-header">{{ q.test_header }}</h3>
+          {% if q.test_description %}
+            <p class="pv-test-desc">{{ q.test_description }}</p>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <li style="margin-bottom:22px;" data-q-index="{{ loop.index }}">
+        <div class="question-item-wrapper">
+          <input type="checkbox"
+                 class="question-select-cb"
+                 id="q-cb-{{ loop.index }}"
+                 data-q-index="{{ loop.index }}"
+                 aria-label="Select question {{ loop.index }}">
+          <div class="question-item-body">
+            <div class="q-meta">
+              Q{{ loop.index }} &nbsp;·&nbsp; {{ (q.type or '') | upper }}
+              &nbsp;·&nbsp; {{ q.bloom or '—' }}
+              &nbsp;·&nbsp; {{ q.concept or '—' }}
+            </div>
+            <div class="q-text">{{ q.question or '' }}</div>
+
+            {% set correct_letter = '' %}
+            {% if q.type == 'mcq' and q.choices %}
+              <ul class="choices" role="list">
+                {% set ans_l = (q.answer or '') | lower %}
+                {% for c in q.choices %}
+                  {% set letter = ['a','b','c','d','e'][loop.index0] %}
+                  {% set choice_l = (c or '') | lower %}
+                  {% set is_correct = (choice_l == ans_l) or (ans_l and ans_l in choice_l) or (ans_l == letter) %}
+                  {% if is_correct %}{% set correct_letter = letter %}{% endif %}
+                  <li class="{{ 'correct' if is_correct else '' }}">
+                    <strong>{{ letter }})</strong> {{ c }}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% elif q.type == 'truefalse' %}
+              <div class="tf-note">(True or False)</div>
+            {% endif %}
+
+            <div class="answer-block">
+              <strong>Answer:</strong>
+              {% if q.type == 'mcq' and correct_letter %}
+                {{ correct_letter }}) {{ q.answer }}
+              {% else %}
+                {{ q.answer or '—' }}
+              {% endif %}
+              {% if q.answer_text %}
+                <div class="answer-text">{{ q.answer_text }}</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+
+  <div class="pv-actions" role="group" aria-label="Preview actions">
+    <button id="quiz-preview-save">Done</button>
+    <button id="quiz-preview-save-selected" disabled
+            title="Select at least one question to enable">Save Selected</button>
+    <button id="quiz-preview-close">Close Preview</button>
+  </div>
+
+</div>

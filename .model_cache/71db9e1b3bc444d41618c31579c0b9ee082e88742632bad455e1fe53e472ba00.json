@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Public Key Infrastructure", "bloom": "Applying", "statement": "PKI protects online communications using public and private keys.", "value": true, "answer": "true", "answer_text": "PKI uses key pairs for secure communication."}

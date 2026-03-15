@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Internet Domain", "bloom": "Applying", "statement": "Relative URLs include the protocol and server name.", "value": false, "answer": "false", "answer_text": "Relative URLs omit the protocol and server name."}

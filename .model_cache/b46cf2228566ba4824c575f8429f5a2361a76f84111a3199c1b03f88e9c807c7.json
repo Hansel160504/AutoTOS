@@ -1,0 +1,1 @@
+{"type": "truefalse", "concept": "Public Key Infrastructure", "bloom": "Applying", "statement": "PKI uses symmetric keys for secure communication.", "value": false, "answer": "false", "answer_text": "PKI uses asymmetric keys."}

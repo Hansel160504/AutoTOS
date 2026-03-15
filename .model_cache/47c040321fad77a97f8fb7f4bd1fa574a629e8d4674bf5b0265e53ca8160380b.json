@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "HTTPS", "bloom": "Remembering", "statement": null, "value": null, "question": "HTTPS ensures data integrity by:", "sample_answer": null, "choices": ["Encrypting data", "Verifying data hasn't been altered", "Disabling cookies", "Increasing bandwidth"], "answer": "B", "answer_text": "HTTPS verifies data hasn't been altered."}

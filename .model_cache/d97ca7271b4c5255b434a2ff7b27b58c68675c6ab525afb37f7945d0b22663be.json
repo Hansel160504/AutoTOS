@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "IoT Security", "bloom": "Remembering", "statement": null, "value": null, "question": "What is a common IoT security vulnerability?", "sample_answer": null, "choices": ["Strong authentication", "Insecure network services", "Regular updates", "Network segmentation"], "answer": "B", "answer_text": "Insecure network services are a common vulnerability."}

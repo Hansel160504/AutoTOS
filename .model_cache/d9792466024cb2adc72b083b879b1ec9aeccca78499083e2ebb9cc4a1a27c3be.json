@@ -1,0 +1,1 @@
+{"type": "mcq", "concept": "a", "bloom": "Applying", "statement": null, "value": null, "question": "Which spoofing attack involves forging an email's sender address?", "sample_answer": null, "choices": ["IP Spoofing", "Email Spoofing", "DNS Spoofing", "Session Hijacking"], "answer": "B", "answer_text": "Email spoofing is the act of forging an email's sender address."}
