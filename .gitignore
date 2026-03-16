@@ -35,6 +35,9 @@ models/
 *.bin
 *.pt
 
+.extracted_cache/
+.model_cache/
+uploads/
 # ========================
 # Local database files
 # ========================
