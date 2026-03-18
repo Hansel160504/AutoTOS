@@ -899,6 +899,29 @@ def view_tos(id):
 
 
 # 2. Change delete_tos — same pattern, redirect admin back to admin panel
+# =========================================================
+# Fixed delete_tos route — paste this into routes/dashboard.py
+# replacing the existing delete_tos function
+# =========================================================
+
+# 2. Change delete_tos — same pattern, redirect admin back to admin panel
+# =========================================================
+# Fixed delete_tos — v2
+# Replace the existing delete_tos function in routes/dashboard.py
+# =========================================================
+
+# =========================================================
+# Fixed delete_tos — v3
+# Replace the existing delete_tos function in routes/dashboard.py
+#
+# Root cause: SQLAlchemy batches parent + child DELETEs into one
+# statement. MySQL FK constraint fires because parent is referenced
+# by children still in the same batch.
+# Fix: db.session.flush() after bulk-deleting children forces the
+# child DELETE SQL to execute BEFORE the parent DELETE SQL,
+# satisfying the FK constraint within the same transaction.
+# =========================================================
+
 @dashboard_bp.route("/delete/<int:id>")
 @login_required
 def delete_tos(id):
@@ -909,13 +932,30 @@ def delete_tos(id):
         return redirect(url_for("dashboard.index"))
 
     try:
-        db.session.delete(record)
-        db.session.commit()
-        flash("TOS Record deleted successfully.", "success")
+        child_count = TosRecord.query.filter_by(parent_id=record.id).count()
+
+        # Delete children and FLUSH immediately so their DELETE SQL hits
+        # the DB before we register the parent deletion.
+        TosRecord.query.filter_by(parent_id=record.id).delete(synchronize_session=False)
+        db.session.flush()          # ← sends child DELETE to DB now
+
+        db.session.delete(record)   # parent DELETE queued
+        db.session.commit()         # parent DELETE sent + committed
+
+        if child_count:
+            flash(
+                f"Deleted '{record.title}' and {child_count} "
+                f"derived exam(s) successfully.",
+                "success",
+            )
+        else:
+            flash(f"Deleted '{record.title}' successfully.", "success")
+
     except Exception as e:
         db.session.rollback()
-        flash("Error deleting record.", "error")
+        logger.exception("delete_tos failed for record id=%d: %s", id, e)
+        flash(f"Error deleting record: {e}", "error")
 
     if current_user.is_admin:
         return redirect(url_for("admin.records"))
-    return redirect(url_for("dashboard.index"))
+    return redirect(url_for("dashboard.index")) 

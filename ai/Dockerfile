@@ -2,31 +2,32 @@ FROM python:3.11
 
 WORKDIR /app
 
-# build deps
-RUN apt-get update && apt-get install -y cmake build-essential && rm -rf /var/lib/apt/lists/*
+# 1. Install build tools and OpenBLAS for Ryzen math performance
+RUN apt-get update && apt-get install -y \
+    cmake \
+    build-essential \
+    libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY ai_packages/ /packages/
+# 2. Set the optimization flags for your Ryzen 5 5600G
+# This ensures that when pip installs from your requirements, it compiles for AVX2
+ENV CMAKE_ARGS="-DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_OPENBLAS=ON"
+ENV FORCE_CMAKE=1
+
 COPY ai/requirements.txt .
 
 RUN pip install --upgrade pip setuptools wheel
 
-# install pre-downloaded packages
-RUN pip install --no-cache-dir --no-index --find-links=/packages \
-    fastapi uvicorn pydantic starlette python-multipart \
-    pymupdf python-docx python-pptx numpy diskcache jinja2
+# 3. Install your requirements (including llama-cpp-python)
+# Because of the CMAKE_ARGS above, llama-cpp-python will be built with AVX2 support
+RUN pip install --no-cache-dir -r requirements.txt
 
-# install llama-cpp-python as before (or your chosen method)
-RUN pip install --no-cache-dir llama-cpp-python==0.3.16
-
-# COPY the folder as a package so "import ai.*" works
+# COPY the folder as a package
 COPY ai/ /app/ai
 
-# make sure /app is on PYTHONPATH
 ENV PYTHONPATH=/app:$PYTHONPATH
-
 RUN mkdir -p /app/uploads /app/models
 
 EXPOSE 8000
 
-# start using the package module path
 CMD ["uvicorn", "ai.ai_api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

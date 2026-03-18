@@ -1,18 +1,18 @@
 # ai_model.py
 # AutoTOS AI module — prompt format matched exactly to training data
 #
-# FIXES APPLIED (v2.15 + perf tweaks):
+# FIXES APPLIED:
+#  - CPU Optimization: n_threads=6, n_batch=512 for Ryzen 5600G
+#  - LlamaGrammar implemented to force JSON and fix response_format TypeError
 #  - smaller chunks, shuffled non-repeating chunk queue
 #  - model-aware prompt cache key
-#  - lower token budgets for faster generation
-#  - improved avoid block and longer recent-stems history
 # ============================================================
 
 import re
 import json
 import fitz
 import base64
-from llama_cpp import Llama
+from llama_cpp import Llama, LlamaGrammar  # Added LlamaGrammar
 from docx import Document
 from pptx import Presentation
 from io import BytesIO
@@ -36,14 +36,12 @@ logging.basicConfig(level=logging.INFO)
 # =====================================================
 MODEL_PATH = os.environ.get("MODEL_PATH", "/app/models/autotos-q4_k_m.gguf")
 
-N_THREADS  = int(os.environ.get("N_THREADS", 6))    # Ryzen 5600G: 6 cores / 12 threads — use all of them
-N_BATCH    = int(os.environ.get("N_BATCH", 512))
-N_CTX      = 1280  # ~110 instr + ~17 spec + ~375 ctx + ~160 out = ~662; 1280 is safe
-BATCH_SIZE = 1     # CPU-only: no parallel benefit from batching
-
-MAX_RETURN    = 50_000  # full lecture notes (was 8 000)
-CHUNK_SIZE    = 800     # chars per context chunk (~65-90 tokens). Smaller → more chunks → more variety
-CHUNK_OVERLAP = 30      # overlap so sentences not split at boundaries (reduced from 50)
+N_THREADS  = 6     # Hardcoded to 6 for Ryzen 5 5600G physical cores
+N_BATCH    = 512   # Increased to 512 for fast prompt ingestion
+N_CTX      = 1280  # Safe context window
+MAX_RETURN = 50_000 
+CHUNK_SIZE = 800   
+CHUNK_OVERLAP = 30 
 
 BASE_DIR        = os.path.dirname(__file__)
 CACHE_DIR       = os.path.join(BASE_DIR, ".extracted_cache")
@@ -55,12 +53,12 @@ logger.info("LLM config: n_ctx=%d n_threads=%d n_batch=%d chunk_size=%d max_retu
             N_CTX, N_THREADS, N_BATCH, CHUNK_SIZE, MAX_RETURN)
 
 # =====================================================
-# TOKEN BUDGETS — tuned for speed without losing quality
+# TOKEN BUDGETS
 # =====================================================
 MAX_TOKENS_SINGLE: Dict[str, int] = {
-    "mcq":  200,
-    "tf":   140,
-    "open": 160, # open-ended single specific answer
+    "mcq":  250,  # Increased from 200
+    "tf":   160,  # Increased from 140
+    "open": 200,  # Increased from 160
 }
 
 # =====================================================
@@ -85,20 +83,20 @@ def get_bloom_cue_line(bloom: str) -> str:
     )
 
 # =====================================================
-# INSTRUCTIONS (must match training exactly)
+# INSTRUCTIONS 
 # =====================================================
 AUTOTOS_INSTRUCTION = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom\u2019s level and concept. "
+    "You are AutoTOS. Generate one exam question aligned with the Bloom’s level and concept. "
     "Output ONLY this JSON:\n"
     '{"type":"mcq|truefalse|open_ended","concept":"...","bloom":"...","question":"...",'
     '"choices":["A text","B text","C text","D text"],"answer":"A|B|C|D|true|false",'
-    '"answer_text":"Why the answer is correct (1-2 sentences)."}\n'
+    '"answer_text":"State the exact answer chosen and explain why it is correct in 1 sentence."}\n' # <-- This line was updated
     "choices field: mcq only. answer_text field: mcq and truefalse only. "
     "Answer based ONLY on the provided context."
 )
 
 AUTOTOS_INSTRUCTION_OPEN = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom\u2019s level and concept. "
+    "You are AutoTOS. Generate one exam question aligned with the Bloom’s level and concept. "
     "Output ONLY this JSON:\n"
     '{"type":"open_ended","concept":"...","bloom":"...","question":"...","answer":"<complete specific answer>"}\n'
     "Do NOT include answer_text or choices. "
@@ -106,7 +104,6 @@ AUTOTOS_INSTRUCTION_OPEN = (
     "Answer based ONLY on the provided context."
 )
 
-# ── Type mappings ──
 TYPE_MAP = {
     "mcq": "mcq", "truefalse": "tf", "true_false": "tf", "tf": "tf",
     "open_ended": "open", "open-ended": "open", "openended": "open", "open": "open",
@@ -117,7 +114,6 @@ OUT_TYPE_NORMALIZE = {
     "open": "open_ended", "open-ended": "open_ended",
 }
 
-# ── Bloom mappings ──
 BLOOM_MAP_SINGLE = {
     "knowledge": "Knowledge", "understand": "Understand", "apply": "Apply",
     "analyze": "Analyze", "analyse": "Analyze", "evaluate": "Evaluate",
@@ -145,7 +141,7 @@ def normalize_out_type(raw_type: str) -> str:
     return OUT_TYPE_NORMALIZE.get((raw_type or "").strip().lower(), raw_type or "mcq")
 
 # =====================================================
-# MODEL LOAD
+# MODEL LOAD (Optimized for Ryzen 5600G)
 # =====================================================
 llm = None
 try:
@@ -156,6 +152,7 @@ try:
         n_threads=N_THREADS,
         n_batch=N_BATCH,
         n_gpu_layers=0,
+        flash_attn=True, # Added Flash Attention for speed/memory
         verbose=False,
     )
     logger.info("Model ready!")
@@ -173,7 +170,6 @@ def _cache_path_for_hash(h: str) -> str:
     return os.path.join(CACHE_DIR, f"{h}.txt")
 
 def _prompt_hash_key(prompt: str, max_tokens: int, temperature: float) -> str:
-    # include model path so caches are model-specific (prevents reusing outputs across quantized model changes)
     model_id = MODEL_PATH or ""
     key = f"{model_id}|{max_tokens}:{temperature:.4f}:{prompt}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
@@ -206,7 +202,6 @@ CACHE_MISSES = 0
 # UTILITIES
 # =====================================================
 def clean_text(txt) -> str:
-    """Normalize whitespace for OUTPUT fields only. NEVER use on prompts."""
     if txt is None: return ""
     if not isinstance(txt, str):
         try: txt = str(txt)
@@ -214,7 +209,6 @@ def clean_text(txt) -> str:
     return re.sub(r"\s+", " ", txt).strip()
 
 def sanitize_prompt(prompt: str) -> str:
-    """Strip leading/trailing whitespace only. Preserves internal \\n."""
     return (prompt or "").strip()
 
 _AWKWARD_PHRASING_RULES = [
@@ -246,51 +240,31 @@ def strip_question_prefix(text: str, is_open_ended: bool = False) -> str:
         text = text[0].upper() + text[1:]
     return _clean_question_phrasing(text)
 
-
-_ANSWER_TEXT_MAX_CHARS = 160  # keep as a guard — first sentence will be enforced
+_ANSWER_TEXT_MAX_CHARS = 250  # Increased from 160
 
 def _truncate_answer_text(text: str) -> str:
-    """
-    Return exactly one, well-formed sentence as the explanation.
-    - Strips common 'Answer:' prefixes.
-    - Picks the first full sentence (split on [.!?] followed by whitespace).
-    - Ensures trailing punctuation, and clamps length to _ANSWER_TEXT_MAX_CHARS
-      while avoiding cutting mid-word where reasonable.
-    """
-    if not text:
-        return ""
-
-    # Normalize whitespace and strip leading 'Answer:' style markers
+    if not text: return ""
+    # Clean whitespace and "Answer:" prefixes
     t = re.sub(r"\s+", " ", text).strip()
     t = re.sub(r'^(answer\s*[:\-]\s*)', '', t, flags=re.IGNORECASE).strip()
-
-    # Split into sentences using punctuation as boundary
+    
+    # Extract the first complete sentence
     sentences = re.split(r'(?<=[.!?])\s+', t)
-    # find first non-empty sentence-like fragment
-    first = ""
-    for s in sentences:
-        if s and s.strip():
-            first = s.strip()
-            break
-    if not first:
-        # fallback: take the start of the text
-        first = t[:_ANSWER_TEXT_MAX_CHARS].strip()
-
+    first = sentences[0].strip() if sentences else t.strip()
+    
     # Ensure it ends with punctuation
     if first and first[-1] not in ".!?":
         first = first + "."
-
-    # If it's short enough, return it
-    if len(first) <= _ANSWER_TEXT_MAX_CHARS:
-        return first
-
-    # Otherwise truncate gently at a word boundary but always end with a period.
-    truncated = first[:_ANSWER_TEXT_MAX_CHARS]
-    last_space = truncated.rfind(" ")
-    if last_space > int(_ANSWER_TEXT_MAX_CHARS * 0.6):
-        truncated = truncated[:last_space]
-    truncated = truncated.rstrip('.,;:') + "."
-    return truncated
+        
+    # Only truncate if the single sentence is abnormally long
+    if len(first) > _ANSWER_TEXT_MAX_CHARS:
+        truncated = first[:_ANSWER_TEXT_MAX_CHARS]
+        last_space = truncated.rfind(" ")
+        if last_space > 0:
+            truncated = truncated[:last_space]
+        return truncated.rstrip('.,;:') + "..." # Add ellipsis so you know it was cut
+        
+    return first
 
 # =====================================================
 # CHUNKING
@@ -299,8 +273,7 @@ _chunk_cache: Dict[str, List[str]] = {}
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
                overlap: int = CHUNK_OVERLAP) -> List[str]:
-    if not text:
-        return []
+    if not text: return []
     text   = text.strip()
     chunks = []
     start  = 0
@@ -317,24 +290,20 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
             if boundary > start + chunk_size // 2:
                 end = boundary + 1
         chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
+        if chunk: chunks.append(chunk)
         start += step
 
     return chunks
 
 def _find_best_chunk_idx(chunks: List[str], topic: str) -> int:
-    if not chunks or not topic:
-        return 0
+    if not chunks or not topic: return 0
     topic_lower = topic.lower()
     for i, chunk in enumerate(chunks):
-        if topic_lower in chunk.lower():
-            return i
+        if topic_lower in chunk.lower(): return i
     for word in topic_lower.split():
         if len(word) > 3:
             for i, chunk in enumerate(chunks):
-                if word in chunk.lower():
-                    return i
+                if word in chunk.lower(): return i
     return 0
 
 def get_chunks_for_text(full_text: str) -> List[str]:
@@ -345,7 +314,7 @@ def get_chunks_for_text(full_text: str) -> List[str]:
     return _chunk_cache[key]
 
 # =====================================================
-# FILE EXTRACTION (unchanged)
+# FILE EXTRACTION 
 # =====================================================
 def extract_text_from_bytes(file_bytes: bytes, filetype: str) -> str:
     text = ""
@@ -418,7 +387,7 @@ def lesson_from_upload(data_or_text: Optional[str]) -> str:
     except Exception: return ""
 
 # =====================================================
-# PROMPT BUILDERS (with improved avoid block)
+# PROMPT BUILDERS
 # =====================================================
 _TF_HINT = "[Declarative factual statement only — do NOT ask a question, do NOT give instructions.]"
 
@@ -430,9 +399,7 @@ _RETRY_NOTES = [
 ]
 
 def _build_avoid_block(seen_questions: List[str]) -> str:
-    """Compact avoid block — include up to 6 recent stems and a short diversity hint."""
-    if not seen_questions:
-        return ""
+    if not seen_questions: return ""
     recent = seen_questions[-6:]
     items  = "; ".join(f'"{q[:50]}"'  for q in recent)
     return f"\n[Avoid repeating: {items}]\n[Focus on a DIFFERENT ASPECT of the topic; do NOT restate definitions.]\n"
@@ -459,22 +426,13 @@ def build_training_prompt(instruction: str, qtype: str, bloom: str,
 # =====================================================
 # JSON EXTRACTORS
 # =====================================================
-# ===== Replace _extract_first_json and _try_parse_json with improved versions =====
 def _extract_first_json(text: str) -> Optional[str]:
-    """
-    Extract first complete JSON object { ... } using brace counter.
-    If the model output was truncated (missing trailing brace), return the
-    longest substring starting at the first '{' (so repair can be attempted).
-    """
-    if not text:
-        return None
+    if not text: return None
     start = text.find('{')
-    if start == -1:
-        return None
+    if start == -1: return None
     depth = 0
     in_string = False
     escape = False
-    last_close_idx = -1
     for i, c in enumerate(text[start:], start):
         if escape:
             escape = False
@@ -485,62 +443,34 @@ def _extract_first_json(text: str) -> Optional[str]:
         if c == '"':
             in_string = not in_string
             continue
-        if in_string:
-            continue
-        if c == '{':
-            depth += 1
+        if in_string: continue
+        if c == '{': depth += 1
         elif c == '}':
             depth -= 1
-            last_close_idx = i
             if depth == 0:
-                # found a complete JSON object
                 return text[start:i + 1]
-    # no balanced closing brace found — return the fragment from '{' to end for repair attempts
-    return text[start:]  # may be truncated; repair function may fix it
-
+    return text[start:] 
 
 def _try_parse_json(json_str: str) -> Optional[Any]:
-    """
-    Try to parse JSON. If direct parsing fails, attempt minor cleanups:
-      - remove trailing commas before } or ]
-      - try to balance braces by appending closing braces (heuristic, up to 6)
-    Returns the parsed object or None.
-    """
-    if not json_str or not isinstance(json_str, str):
-        return None
+    if not json_str or not isinstance(json_str, str): return None
+    try: return json.loads(json_str)
+    except Exception: pass
 
-    # quick attempt
-    try:
-        return json.loads(json_str)
-    except Exception:
-        pass
-
-    # Basic cleanup: remove trailing commas before } or ]
     cleaned = re.sub(r',\s*([}\]])', r'\1', json_str)
+    if cleaned.count('"') % 2 == 1: cleaned = cleaned + '"'
 
-    # Try to close unbalanced quotes by ensuring even number of quotes
-    if cleaned.count('"') % 2 == 1:
-        # attempt to append a closing quote
-        cleaned = cleaned + '"'
-
-    # Try incremental brace balancing: append '}' until braces balance or up to N times.
     open_braces = cleaned.count('{') - cleaned.count('}')
     if open_braces > 0 and open_braces <= 6:
         cleaned_candidate = cleaned + ('}' * open_braces)
-        try:
-            return json.loads(cleaned_candidate)
-        except Exception:
-            pass
+        try: return json.loads(cleaned_candidate)
+        except Exception: pass
 
-    # Last attempt: try simple json.loads on the cleaned string
-    try:
-        return json.loads(cleaned)
-    except Exception:
-        return None
+    try: return json.loads(cleaned)
+    except Exception: return None
+
 # =====================================================
-# MODEL CALLER
+# MODEL CALLER (WITH LLAMAGRAMMAR)
 # =====================================================
-# ===== Replace ask_model with new behavior that attempts repair + retry =====
 def ask_model(prompt: str, max_tokens: int = 160,
               temperature: float = 0.45) -> Optional[dict]:
     global CACHE_HITS, CACHE_MISSES
@@ -558,10 +488,31 @@ def ask_model(prompt: str, max_tokens: int = 160,
 
     def _call_model(max_tokens_call, temp_call):
         try:
+            # 1. Define the exact JSON schema required
+            schema = {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string"},
+                    "concept": {"type": "string"},
+                    "bloom": {"type": "string"},
+                    "question": {"type": "string"},
+                    "choices": {"type": "array", "items": {"type": "string"}},
+                    "answer": {"type": "string"},
+                    "answer_text": {"type": "string"}
+                },
+                "required": ["type", "concept", "bloom", "question", "answer"]
+            }
+            
+            # 2. Convert to LlamaGrammar
+            json_grammar = LlamaGrammar.from_json_schema(json.dumps(schema))
+
             start = time.time()
             resp = llm.create_completion(
-                prompt=prompt, max_tokens=max_tokens_call,
-                temperature=temp_call, top_p=0.95,
+                prompt=prompt, 
+                max_tokens=max_tokens_call,
+                temperature=temp_call, 
+                top_p=0.95,
+                grammar=json_grammar, # Enforces strict JSON structure instantly
                 stop=["### Instruction:", "### Target", "\n###", "<think>", "</s>"],
                 echo=False,
             )
@@ -570,6 +521,7 @@ def ask_model(prompt: str, max_tokens: int = 160,
                 raw = resp["choices"][0].get("text", "") or ""
             elif isinstance(resp, str):
                 raw = resp
+                
             duration = time.time() - start
             logger.info("ask_model duration=%.2fs raw_len=%d max_tok=%d temp=%.2f",
                         duration, len(raw), max_tokens_call, temp_call)
@@ -584,38 +536,22 @@ def ask_model(prompt: str, max_tokens: int = 160,
         return None
 
     raw = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
-    if not raw:
-        return None
+    if not raw: return None
 
     json_str = _extract_first_json(raw)
     parsed = None
     if json_str:
         parsed = _try_parse_json(json_str)
-    # If not parsed, attempt heuristical repair/parsing on the fragment
+        
     if parsed is None and json_str:
         logger.warning("No JSON parse on first attempt; trying repair heuristics.")
-        parsed = _try_parse_json(json_str)  # _try_parse_json already tries cleaning
-        if parsed:
-            logger.info("Repaired truncated JSON successfully.")
-    # If still None, retry the model once with more tokens and lower temperature
+        parsed = _try_parse_json(json_str) 
+        if parsed: logger.info("Repaired truncated JSON successfully.")
+        
     if parsed is None:
-        logger.info("Retrying model with larger token budget to avoid truncation.")
-        retry_tokens = min(max_tokens + 80, 1024)  # small bump but bounded
-        raw2 = _call_model(retry_tokens, max(0.0, temperature - 0.15))
-        if raw2 and raw2.strip():
-            raw2 = re.sub(r"<think>[\s\S]*?</think>", "", raw2).strip()
-            json_str2 = _extract_first_json(raw2)
-            if json_str2:
-                parsed = _try_parse_json(json_str2)
-                if parsed:
-                    logger.info("Parsed JSON from retry call.")
-                    write_model_cache(cache_key, parsed)
-                    return parsed
-        # If retry failed, log the first 1000 chars for debugging
-        logger.warning("Retry failed. Raw output sample: %s", raw[:1000].replace("\n", " "))
+        logger.warning("Retry logic triggered. Model failed to follow grammar properly.")
         return None
 
-    # parsed successfully
     write_model_cache(cache_key, parsed)
     return parsed
 
@@ -636,7 +572,7 @@ except Exception:
 # CONTEXT FINDER
 # =====================================================
 def get_relevant_context(full_text: str, topic: str,
-                          window_size: int = 600) -> str:
+                         window_size: int = 600) -> str:
     if not full_text: return ""
     ft_lower    = full_text.lower()
     topic_lower = (topic or "").lower()
@@ -645,12 +581,11 @@ def get_relevant_context(full_text: str, topic: str,
         for word in [w for w in topic_lower.split() if len(w) > 3]:
             idx = ft_lower.find(word)
             if idx != -1: break
-    if idx == -1:
-        return full_text[:window_size]
+    if idx == -1: return full_text[:window_size]
     return full_text[max(0, idx - 100): min(len(full_text), idx + window_size)]
 
 # =====================================================
-# NORMALIZATION (unchanged)
+# NORMALIZATION 
 # =====================================================
 def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(out, dict): return {}
@@ -662,12 +597,9 @@ def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
         "ans": "answer", "correct": "answer",
     }
     for src, dst in mapping.items():
-        if src in out and dst not in out:
-            out[dst] = out[src]
-    if "answer" not in out and "sample_answer" in out:
-        out["answer"] = out["sample_answer"]
-    if isinstance(out.get("answer"), bool):
-        out["answer"] = "true" if out["answer"] else "false"
+        if src in out and dst not in out: out[dst] = out[src]
+    if "answer" not in out and "sample_answer" in out: out["answer"] = out["sample_answer"]
+    if isinstance(out.get("answer"), bool): out["answer"] = "true" if out["answer"] else "false"
     return out
 
 def normalize_generated_question(q: dict, expected_display_type: str,
@@ -733,7 +665,7 @@ def normalize_generated_question(q: dict, expected_display_type: str,
     return out
 
 # =====================================================
-# DUPLICATE FINGERPRINT (unchanged)
+# DUPLICATE FINGERPRINT 
 # =====================================================
 _FP_STOPWORDS = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
@@ -783,7 +715,7 @@ def _question_stem(q: dict) -> str:
     return (q.get("question") or "")[:80].strip()
 
 # =====================================================
-# ANSWER ↔ EXPLANATION CONSISTENCY CHECKER (unchanged)
+# ANSWER ↔ EXPLANATION CONSISTENCY CHECKER 
 # =====================================================
 def _answer_matches_explanation(answer_letter: str, choices: list,
                                  answer_text: str) -> tuple:
@@ -816,7 +748,7 @@ def _answer_matches_explanation(answer_letter: str, choices: list,
     return True, answer_letter
 
 # =====================================================
-# ANSWER VALIDATOR (unchanged)
+# ANSWER VALIDATOR 
 # =====================================================
 _ANSWER_ALWAYS_BAD = {"—", "-", "", "answer:"}
 _OPEN_PLACEHOLDERS = {
@@ -862,7 +794,7 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
     return True
 
 # =====================================================
-# TF VALIDATOR (unchanged)
+# TF VALIDATOR
 # =====================================================
 _TF_TASK_VERBS = re.compile(
     r'^(convert|calculate|compute|list|draw|design|write|find|determine|'
@@ -890,7 +822,7 @@ def _is_valid_tf(q: dict) -> bool:
     return True
 
 # =====================================================
-# SINGLE-QUESTION GENERATOR (unchanged)
+# SINGLE-QUESTION GENERATOR 
 # =====================================================
 def _generate_single(topic: str, prompt_type: str, display_type: str,
                      bloom: str, context: str, max_tok: int,
@@ -941,17 +873,16 @@ def _generate_single(topic: str, prompt_type: str, display_type: str,
     return None
 
 # =====================================================
-# MAIN GENERATOR (with shuffled chunk queue)
+# MAIN GENERATOR 
 # =====================================================
 def generate_from_records(records: List[dict],
-                           max_items: Optional[int] = None) -> List[dict]:
+                          max_items: Optional[int] = None) -> List[dict]:
     out_questions: List[dict] = []
     limit         = min(len(records), max_items) if max_items else len(records)
     seen_fps:  set       = set()
-    seen_stems: List[str] = []   # rolling list of recent question stems for avoid injection
-    topic_slot_counter: Dict[str, List[int]] = {}   # per-topic shuffled chunk index queue
+    seen_stems: List[str] = []   
+    topic_slot_counter: Dict[str, List[int]] = {}   
 
-    # ── Build slot metadata ──
     slots = []
     for i in range(limit):
         rec       = records[i]
@@ -975,7 +906,6 @@ def generate_from_records(records: List[dict],
                      input_obj.get("file_path") or rec.get("file_path") or "")
         full_text = lesson_from_upload(candidate) if candidate else ""
 
-        # ── Assign a unique chunk for this slot ──────────────────────────────
         context = ""
         if full_text:
             chunks    = get_chunks_for_text(full_text)
@@ -983,19 +913,17 @@ def generate_from_records(records: List[dict],
             topic_key = f"{topic}::{text_hash}"
             base_idx  = _find_best_chunk_idx(chunks, topic)
 
-            # prepare a shuffled queue of indices (biased to keep base_idx first)
             if topic_key not in topic_slot_counter:
                 idxs = list(range(len(chunks)))
                 if base_idx in idxs:
                     idxs.remove(base_idx)
                 idxs.insert(0, base_idx)
-                random.shuffle(idxs[1:])  # keep base_idx first, shuffle the rest
+                random.shuffle(idxs[1:])  
                 topic_slot_counter[topic_key] = idxs
 
             idxs = topic_slot_counter[topic_key]
             chunk_idx = idxs.pop(0)
 
-            # recycle idx list when exhausted (so future runs recreate it)
             if not idxs:
                 topic_slot_counter.pop(topic_key, None)
 
@@ -1021,7 +949,6 @@ def generate_from_records(records: List[dict],
             "record":       rec,
         })
 
-    # ── Process each slot ──
     for slot in slots:
         q = _generate_single(
             slot["topic"], slot["prompt_type"], slot["display_type"],
@@ -1063,7 +990,7 @@ def generate_from_records(records: List[dict],
     return out_questions
 
 # =====================================================
-# WRAPPER, MISC, API (unchanged)
+# WRAPPER, MISC, API 
 # =====================================================
 def generate_quiz_for_topics(records_or_topics,
                               max_items: Optional[int] = None,
