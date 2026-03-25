@@ -1,23 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>View TOS – {{ record.title }}</title>
+<!-- ▸ ANTI-FLASH: restore theme before first paint -->
+<script>
+(function(){
+    try{ var t=localStorage.getItem('autotos-theme'); if(t==='dark') document.documentElement.setAttribute('data-theme','dark'); }catch(e){}
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* ══ LIGHT ══ */
 :root {
     --navy:        #1a2e4a;
     --navy-deep:   #111f33;
     --blue:        #2563eb;
     --blue-light:  #dbeafe;
     --slate:       #64748b;
-    --slate-light: #f1f5f9;
     --border:      #e2e8f0;
     --text:        #0f172a;
-    --white:       #ffffff;
     --amber:       #d97706;
     --amber-light: #fef3c7;
     --amber-border:#fcd34d;
@@ -25,260 +30,175 @@
     --red-light:   #fee2e2;
     --green:       #16a34a;
     --green-light: #dcfce7;
-    --radius:      10px;
     --shadow-lg:   0 20px 48px rgba(0,0,0,0.18);
+    --bondpaper-w: 900px;
+
+    --bg-page:       #f1f5f9;
+    --bg-card:       #ffffff;
+    --bg-stage:      rgba(0,0,0,0.52);
+    --bg-thead:      #f8fafc;
+    --bg-answer:     #f0fdf4;
+    --bg-choice:     #f8fafc;
+    --bg-derived:    #fffbeb;
+    --text-main:     #0f172a;
+    --text-sub:      #64748b;
+    --text-muted:    #94a3b8;
+    --border-col:    #e2e8f0;
+    --header-bg:     #111f33;
 }
 
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* ══ DARK ══ */
+[data-theme="dark"] {
+    --navy:        #93c5fd;
+    --navy-deep:   #e2e8f0;
+    --blue:        #3b82f6;
+    --blue-light:  #1e3a5f;
+    --slate:       #94a3b8;
+    --border:      #334155;
+    --text:        #f1f5f9;
+    --amber:       #f59e0b;
+    --amber-light: #2d1f06;
+    --amber-border:#92400e;
+    --red:         #f87171;
+    --red-light:   #2d0a0a;
+    --green:       #22c55e;
+    --green-light: #052e16;
 
-/* ── Full-screen layout ── */
-html, body {
-    height: 100%;
-    font-family: 'DM Sans', system-ui, sans-serif;
-    background: var(--slate-light);
-    color: var(--text);
-    overflow: hidden; /* prevent browser scroll */
+    --bg-page:       #0f172a;
+    --bg-card:       #1e293b;
+    --bg-stage:      rgba(0,0,0,0.72);
+    --bg-thead:      #162032;
+    --bg-answer:     #0a1f12;
+    --bg-choice:     #162032;
+    --bg-derived:    #1c1709;
+    --text-main:     #f1f5f9;
+    --text-sub:      #94a3b8;
+    --text-muted:    #475569;
+    --border-col:    #334155;
+    --header-bg:     #080f1a;
 }
+
+* { box-sizing:border-box;margin:0;padding:0; }
+
+html, body { height:100%; font-family:'DM Sans',system-ui,sans-serif; color:var(--text-main); }
+body { background:var(--bg-page); transition:background 0.25s; }
 
 /* ── Header ── */
-header {
-    background: var(--navy-deep);
-    height: 60px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 28px;
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-    position: relative;
-    z-index: 10;
-}
+header { background:var(--header-bg);height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,0.25); }
+.header-logo { display:flex;align-items:center;gap:10px;text-decoration:none; }
+.header-logo-mark { width:34px;height:34px;background:var(--blue);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:17px;color:white;flex-shrink:0; }
+.header-logo-text { font-family:'DM Serif Display',serif;font-size:19px;color:white; }
+.header-logo-text span { color:#60a5fa; }
+header nav { display:flex;align-items:center;gap:2px; }
+header nav a { padding:6px 14px;border-radius:7px;text-decoration:none;font-size:13px;font-weight:500;color:#94a3b8;transition:background 0.15s,color 0.15s; }
+header nav a:hover { background:rgba(255,255,255,0.08);color:white; }
+header nav a.nav-logout { color:#94a3b8;border:1px solid rgba(255,255,255,0.12);margin-left:6px; }
+header nav a.nav-logout:hover { background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.3);color:#fca5a5; }
 
-.header-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
-.header-logo-mark {
-    width: 34px; height: 34px; background: var(--blue); border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'DM Serif Display', serif; font-size: 17px; color: white; flex-shrink: 0;
-}
-.header-logo-text { font-family: 'DM Serif Display', serif; font-size: 19px; color: white; }
-.header-logo-text span { color: #60a5fa; }
+/* ── Theme toggle ── */
+.theme-toggle { display:flex;align-items:center;gap:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:5px 12px 5px 8px;cursor:pointer;transition:background 0.15s;margin-left:8px;flex-shrink:0; }
+.theme-toggle:hover { background:rgba(255,255,255,0.12); }
+.theme-toggle-track { width:32px;height:17px;background:#334155;border-radius:20px;position:relative;transition:background 0.25s;flex-shrink:0; }
+[data-theme="dark"] .theme-toggle-track { background:var(--blue); }
+.theme-toggle-thumb { position:absolute;top:2px;left:2px;width:13px;height:13px;background:white;border-radius:50%;transition:transform 0.25s cubic-bezier(.4,0,.2,1); }
+[data-theme="dark"] .theme-toggle-thumb { transform:translateX(15px); }
+.theme-toggle-icon { font-size:13px; }
+.theme-toggle-label { font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap; }
+[data-theme="dark"] .theme-toggle-label { color:#93c5fd; }
 
-header nav { display: flex; align-items: center; gap: 2px; }
-header nav a {
-    padding: 6px 14px; border-radius: 7px; text-decoration: none;
-    font-size: 13px; font-weight: 500; color: #94a3b8;
-    transition: background 0.15s, color 0.15s;
-}
-header nav a:hover { background: rgba(255,255,255,0.08); color: white; }
-header nav a.nav-logout {
-    color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); margin-left: 6px;
-}
-header nav a.nav-logout:hover {
-    background: rgba(220,38,38,0.15); border-color: rgba(220,38,38,0.3); color: #fca5a5;
-}
-
-/* ── Toolbar bar (below header, above bondpaper) ── */
-.view-toolbar {
-    background: var(--white);
-    border-bottom: 1px solid var(--border);
-    padding: 10px 28px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-    flex-shrink: 0;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-}
-
-.toolbar-title {
-    font-family: 'DM Serif Display', serif;
-    font-size: 17px;
-    color: var(--navy-deep);
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.toolbar-meta {
-    font-size: 12px;
-    color: var(--slate);
-    white-space: nowrap;
-}
-
-.toolbar-actions { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-
-/* Badges */
-.badge {
-    display: inline-flex; align-items: center;
-    font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.4px;
-    padding: 3px 9px; border-radius: 20px; white-space: nowrap;
-}
-.badge.master  { background: var(--blue-light);  color: var(--blue);  border: 1px solid #bfdbfe; }
-.badge.derived { background: var(--amber-light); color: var(--amber); border: 1px solid var(--amber-border); }
-
-/* Buttons */
-.btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 14px; border-radius: 8px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 12px; font-weight: 600; cursor: pointer;
-    border: none; text-decoration: none; white-space: nowrap;
-    transition: background 0.15s, filter 0.15s;
-}
-.btn.secondary { background: var(--white); color: var(--navy); border: 1.5px solid var(--border); }
-.btn.secondary:hover { background: var(--slate-light); }
-.btn.primary { background: var(--blue); color: white; }
-.btn.primary:hover { background: #1d4ed8; }
-.btn.danger { background: var(--red-light); color: var(--red); border: 1.5px solid #fecaca; }
-.btn.danger:hover { background: #fecaca; }
-.btn.amber-btn { background: var(--amber-light); color: var(--amber); border: 1.5px solid var(--amber-border); }
-.btn.amber-btn:hover { background: #fef9c3; }
-
-/* ── Viewport: fills remaining height, centers the bondpaper ── */
-.view-viewport {
-    /* Full height minus header (60px) minus toolbar (~54px) */
-    height: calc(100vh - 114px);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    overflow-y: auto;               /* viewport scrolls */
-    padding: 24px 20px;
-    background: var(--slate-light);
-}
+/* ── Overlay stage ── */
+.view-stage { position:fixed;inset:0;top:60px;background:var(--bg-stage);backdrop-filter:blur(2px);display:flex;justify-content:center;align-items:flex-start;padding:24px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;z-index:100; }
 
 /* ── Bond paper ── */
-.bondpaper {
-    width: min(900px, calc(100% - 16px));
-    background: var(--white);
-    border-radius: 12px;
-    padding: 32px 36px;
-    box-shadow: var(--shadow-lg);
-    border: 1px solid rgba(0,0,0,0.06);
-    box-sizing: border-box;
-    margin-bottom: 24px;
-    flex-shrink: 0;
-}
+.bondpaper { width:min(var(--bondpaper-w),calc(100% - 32px));background:var(--bg-card);border-radius:12px;box-shadow:var(--shadow-lg);border:1px solid var(--border-col);box-sizing:border-box;position:relative;margin:0 auto 24px;max-height:calc(100vh - 60px - 80px);overflow-y:auto;animation:popIn 0.22s ease both;transition:background 0.25s; }
+.bondpaper.is-derived { border-top:3px solid var(--amber); }
+@keyframes popIn { from{opacity:0;transform:scale(0.97)} to{opacity:1;transform:scale(1)} }
 
-/* Derived accent border */
-.bondpaper.is-derived { border-top: 3px solid var(--amber); }
+/* ── Sticky toolbar ── */
+.preview-tools { display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border-col);position:sticky;top:0;background:var(--bg-card);z-index:10;gap:12px;flex-wrap:wrap;transition:background 0.25s; }
+.preview-tools .left { display:flex;align-items:center;gap:10px;min-width:0;flex:1; }
+.preview-tools .left .doc-title { font-family:'DM Serif Display',serif;font-size:16px;color:var(--navy-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px; }
+.preview-tools .right { display:flex;gap:8px;align-items:center;flex-shrink:0; }
+
+/* ── Buttons ── */
+.btn { display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none;text-decoration:none;white-space:nowrap;transition:background 0.15s,transform 0.1s; }
+.btn:active { transform:translateY(1px); }
+.btn.secondary { background:var(--bg-card);color:var(--navy-deep);border:1.5px solid var(--border-col); }
+.btn.secondary:hover { filter:brightness(0.92); }
+.btn.primary { background:var(--blue);color:white;box-shadow:0 1px 4px rgba(37,99,235,0.25); }
+.btn.primary:hover { background:#1d4ed8; }
+.btn.danger { background:var(--red-light);color:var(--red);border:1.5px solid var(--red); }
+.btn.danger:hover { filter:brightness(0.92); }
+
+/* ── Badge ── */
+.badge { display:inline-flex;align-items:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0; }
+.badge.master { background:var(--blue-light);color:var(--blue);border:1px solid var(--blue); }
+.badge.derived { background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border); }
+
+/* ── Paper body ── */
+.preview-body { padding:28px 32px 36px; }
 
 /* ── Derived banner ── */
-.derived-banner {
-    display: flex; align-items: flex-start; gap: 12px;
-    background: #fffbeb;
-    border: 1px solid var(--amber-border);
-    border-left: 4px solid var(--amber);
-    border-radius: 8px; padding: 12px 16px;
-    margin-bottom: 20px; font-size: 13px; color: #78350f;
-    flex-wrap: wrap;
-}
-.derived-banner .banner-icon { font-size: 20px; flex-shrink: 0; }
-.derived-banner .banner-body { flex: 1; min-width: 180px; line-height: 1.5; }
-.derived-banner .banner-body strong { display: block; font-size: 14px; color: #92400e; margin-bottom: 3px; }
-.derived-banner a { color: var(--blue); font-weight: 600; text-decoration: none; }
-.derived-banner a:hover { text-decoration: underline; }
-.derived-banner .banner-stats { font-size: 12px; color: #a16207; margin-top: 4px; }
+.derived-banner { display:flex;align-items:flex-start;gap:12px;background:var(--bg-derived);border:1px solid var(--amber-border);border-left:4px solid var(--amber);border-radius:8px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:var(--amber);flex-wrap:wrap; }
+.derived-banner .banner-icon { font-size:20px;flex-shrink:0; }
+.derived-banner .banner-body { flex:1;min-width:180px;line-height:1.5; }
+.derived-banner .banner-body strong { display:block;font-size:14px;color:var(--amber);margin-bottom:3px; }
+.derived-banner a { color:var(--blue);font-weight:600;text-decoration:none; }
+.derived-banner a:hover { text-decoration:underline; }
+.derived-banner .banner-stats { font-size:12px;color:var(--text-sub);margin-top:4px; }
 
 /* ── Paper header ── */
-.paper-header { text-align: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
-.paper-header h2 {
-    font-family: 'DM Serif Display', serif;
-    font-size: 22px; color: var(--navy-deep); margin-bottom: 6px;
-}
-.paper-header .paper-meta { font-size: 13px; color: var(--slate); }
+.paper-header { text-align:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border-col); }
+.paper-header h2 { font-family:'DM Serif Display',serif;font-size:22px;font-weight:400;color:var(--navy-deep);margin-bottom:6px; }
+.paper-header .paper-meta { font-size:13px;color:var(--text-sub); }
 
 /* ── Section label ── */
-.section-label {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.5px; color: var(--slate);
-    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
-}
-.section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.section-label { font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-sub);margin-bottom:10px;display:flex;align-items:center;gap:8px; }
+.section-label::after { content:'';flex:1;height:1px;background:var(--border-col); }
 
 /* ── Spec table ── */
-.spec-table {
-    width: 100%; border-collapse: collapse;
-    margin-bottom: 24px; font-size: 12px;
-}
-.spec-table th, .spec-table td {
-    border: 1px solid #e2e8f0;
-    padding: 7px 9px; text-align: left; vertical-align: middle;
-}
-.spec-table thead th {
-    background: #f8fafc; font-weight: 700;
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; color: var(--slate);
-}
-.spec-table .center { text-align: center; }
-.spec-table .right  { text-align: right; }
-.spec-table .small  { font-size: 11px; color: var(--slate); }
-.spec-table tfoot tr { font-weight: 700; background: #f8fafc; }
+.spec-table { width:100%;border-collapse:collapse;margin-bottom:24px;font-size:12px; }
+.spec-table th, .spec-table td { border:1px solid var(--border-col);padding:7px 9px;text-align:left;vertical-align:middle; }
+.spec-table thead th { background:var(--bg-thead);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-sub); }
+.spec-table .center { text-align:center; }
+.spec-table .right { text-align:right; }
+.spec-table .small { font-size:11px;color:var(--text-sub); }
+.spec-table tbody tr:hover td { background:var(--bg-thead); }
+.spec-table tfoot tr td { font-weight:700;background:var(--bg-thead); }
+.spec-table tbody td { color:var(--text-main); }
 
-/* ── Test section header ── */
-.test-section-header {
-    font-family: 'DM Serif Display', serif;
-    font-size: 18px; color: var(--blue);
-    margin-top: 28px; margin-bottom: 4px;
-    border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;
-}
-.test-section-desc {
-    font-size: 13px; color: var(--slate);
-    font-style: italic; margin-bottom: 16px;
-}
+/* ── Test section headers ── */
+.test-section-header { font-family:'DM Serif Display',serif;font-size:18px;color:var(--blue);margin-top:28px;margin-bottom:4px;border-bottom:2px solid var(--border-col);padding-bottom:6px; }
+.test-section-desc { font-size:13px;color:var(--text-sub);font-style:italic;margin-bottom:16px; }
 
-/* ── Questions list ── */
-ol.questions { margin: 0; padding-left: 20px; }
-ol.questions > li { margin-bottom: 24px; line-height: 1.5; page-break-inside: avoid; }
+/* ── Questions ── */
+ol.questions { margin:0;padding-left:20px; }
+ol.questions > li { margin-bottom:24px;line-height:1.5;page-break-inside:avoid; }
+.q-meta { font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:5px; }
+.q-text { font-size:14px;color:var(--text-main);margin-bottom:10px;font-weight:500; }
+.choices { list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:5px; }
+.choices li { padding:7px 12px;border-radius:7px;background:var(--bg-choice);border:1px solid var(--border-col);font-size:13px;color:var(--text-main); }
+.choices li.correct { background:var(--green-light);border-color:var(--green);color:var(--green);font-weight:600; }
+.tf-note { font-size:13px;color:var(--text-sub);font-style:italic;margin-bottom:10px; }
+.answer-block { font-size:13px;color:var(--text-main);background:var(--bg-answer);padding:10px 14px;border-left:3px solid var(--green);border-radius:6px; }
+.answer-block .answer-text { font-size:12px;color:var(--text-sub);margin-top:4px; }
 
-.q-meta {
-    font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.5px; color: #94a3b8; margin-bottom: 5px;
-}
-.q-text { font-size: 14px; color: var(--text); margin-bottom: 10px; font-weight: 500; }
+/* ── Bottom actions ── */
+.pv-actions { display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:32px;padding-top:24px;border-top:1px solid var(--border-col); }
+.pv-actions .btn { padding:10px 22px;font-size:13px; }
 
-.choices { list-style: none; padding: 0; margin: 0 0 10px 0; display: flex; flex-direction: column; gap: 5px; }
-.choices li {
-    padding: 7px 12px; border-radius: 7px;
-    background: #f8fafc; border: 1px solid var(--border);
-    font-size: 13px;
-}
-.choices li.correct {
-    background: var(--green-light); border-color: #86efac;
-    color: #14532d; font-weight: 600;
-}
-
-.tf-note { font-size: 13px; color: var(--slate); font-style: italic; margin-bottom: 10px; }
-
-.answer-block {
-    font-size: 13px; color: var(--text);
-    background: #f0fdf4; padding: 10px 14px;
-    border-left: 3px solid var(--green); border-radius: 6px;
-}
-.answer-block .answer-text { font-size: 12px; color: var(--slate); margin-top: 4px; }
-
-/* ── Print styles ── */
+/* ── Print ── */
 @media print {
-    html, body { overflow: visible !important; height: auto !important; }
-    header, .view-toolbar, .derived-banner { display: none !important; }
-    .view-viewport {
-        height: auto !important; overflow: visible !important;
-        padding: 0 !important; background: white !important;
-        display: block !important;
-    }
-    .bondpaper {
-        box-shadow: none !important; border: none !important;
-        padding: 0 !important; margin: 0 !important;
-        width: 100% !important; max-width: 100% !important;
-        border-radius: 0 !important;
-    }
-    .bondpaper.is-derived { border-top: none !important; }
-    .spec-table th, .spec-table td { border: 1px solid #ccc !important; }
-    ol.questions > li { break-inside: avoid; }
-    .test-section-header { break-after: avoid; }
-    a[href]::after { content: '' !important; }
+    html,body{overflow:visible!important}
+    header,.preview-tools,.pv-actions,.derived-banner{display:none!important}
+    .view-stage{position:static!important;background:white!important;padding:0!important;overflow:visible!important}
+    .bondpaper{max-height:none!important;overflow:visible!important;box-shadow:none!important;border:none!important;border-radius:0!important;animation:none!important;width:100%!important}
+    .preview-body{padding:0!important}
+    .spec-table th,.spec-table td{border:1px solid #ccc!important}
+    ol.questions>li{break-inside:avoid}
+    a[href]::after{content:''!important}
 }
+@media(max-width:700px){ .view-stage{padding:16px 10px} .preview-body{padding:20px 18px} .preview-tools{padding:12px 16px} .theme-toggle-label{display:none} }
 </style>
 </head>
 <body>
@@ -292,213 +212,195 @@ ol.questions > li { margin-bottom: 24px; line-height: 1.5; page-break-inside: av
         <a href="/dashboard/" class="nav-link">Dashboard</a>
         <a href="/dashboard/create" class="nav-link">Create TOS</a>
         <a href="/logout" class="nav-link nav-logout">Logout</a>
+
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+            <div class="theme-toggle-track"><div class="theme-toggle-thumb"></div></div>
+            <span class="theme-toggle-icon" id="themeIcon">🌙</span>
+            <span class="theme-toggle-label" id="themeLabel">Dark</span>
+        </button>
     </nav>
 </header>
 
-<!-- Toolbar -->
-<div class="view-toolbar">
-    <div class="toolbar-title">
-        {{ record.title }}
-        {% if record.is_derived %}
-            <span class="badge derived" style="margin-left:8px;">✂ Derived</span>
-        {% else %}
-            <span class="badge master" style="margin-left:8px;">⊞ Master</span>
-        {% endif %}
-    </div>
-    <div class="toolbar-meta">
-        {{ record.date_created }} &nbsp;·&nbsp;
-        {{ record.total_items }} item{% if record.total_items != 1 %}s{% endif %}
-    </div>
-    <div class="toolbar-actions">
-        <a href="{{ url_for('dashboard.index') }}" class="btn secondary">← Dashboard</a>
-        <button class="btn primary" onclick="window.print()">🖨 Print</button>
-        <a href="{{ url_for('dashboard.delete_tos', id=record.id) }}"
-           class="btn danger"
-           onclick="return confirm('Delete this record permanently?');">
-            🗑 Delete
-        </a>
-    </div>
-</div>
+<div class="view-stage">
+    <article class="bondpaper {{ 'is-derived' if record.is_derived else '' }}" role="dialog" aria-modal="true">
 
-<!-- Scrollable viewport -->
-<div class="view-viewport">
-    <article class="bondpaper {{ 'is-derived' if record.is_derived else '' }}">
-
-        {# Derived-from banner #}
-        {% if record.is_derived and parent_record is defined and parent_record %}
-        <div class="derived-banner">
-            <span class="banner-icon">✂️</span>
-            <div class="banner-body">
-                <strong>This is a derived exam — selected subset of a master bank.</strong>
-                Source:
-                <a href="{{ url_for('dashboard.view_tos', id=parent_record.id) }}">
-                    {{ parent_record.title }}
+        <div class="preview-tools">
+            <div class="left">
+                <span class="doc-title">{{ record.title }}</span>
+                {% if record.is_derived %}
+                    <span class="badge derived">✂ Derived</span>
+                {% else %}
+                    <span class="badge master">⊞ Master</span>
+                {% endif %}
+            </div>
+            <div class="right">
+                <a href="{{ url_for('dashboard.index') }}" class="btn secondary">Close</a>
+                <button class="btn primary" onclick="window.print()">🖨 Print</button>
+                <a href="{{ url_for('dashboard.delete_tos', id=record.id) }}"
+                   class="btn danger"
+                   onclick="return confirm('Delete this record permanently?');">
+                    🗑 Delete
                 </a>
-                ({{ parent_record.total_items }} items)
-                <div class="banner-stats">
-                    {{ record.total_items }} of {{ parent_record.total_items }} items
-                    ({{ ((record.total_items / parent_record.total_items) * 100) | round(1) }}% selected)
+            </div>
+        </div>
+
+        <div class="preview-body">
+
+            {% if record.is_derived and parent_record is defined and parent_record %}
+            <div class="derived-banner">
+                <span class="banner-icon">✂️</span>
+                <div class="banner-body">
+                    <strong>This is a derived exam — selected subset of a master bank.</strong>
+                    Source: <a href="{{ url_for('dashboard.view_tos', id=parent_record.id) }}">{{ parent_record.title }}</a> ({{ parent_record.total_items }} items)
+                    <div class="banner-stats">{{ record.total_items }} of {{ parent_record.total_items }} items ({{ ((record.total_items / parent_record.total_items) * 100) | round(1) }}% selected)</div>
                 </div>
             </div>
-        </div>
-        {% elif record.is_derived %}
-        <div class="derived-banner">
-            <span class="banner-icon">⚠️</span>
-            <div class="banner-body">
-                <strong>This is a derived exam.</strong>
-                The original master bank has been deleted.
+            {% elif record.is_derived %}
+            <div class="derived-banner">
+                <span class="banner-icon">⚠️</span>
+                <div class="banner-body"><strong>This is a derived exam.</strong> The original master bank has been deleted.</div>
             </div>
-        </div>
-        {% endif %}
+            {% endif %}
 
-        {# Paper header #}
-        <div class="paper-header">
-            <h2>{{ record.title }}</h2>
-            <div class="paper-meta">
-                {% set subject_type = topics[0].get('subject_type') if topics else None %}
-                {% if subject_type %}
-                    {{ subject_type.replace('nonlab','Non-Laboratory').replace('lab','Laboratory') }} &nbsp;·&nbsp;
-                {% endif %}
-                Total items: {{ record.total_items }}
-                {% if record.is_derived and parent_record is defined and parent_record %}
-                    &nbsp;·&nbsp; selected from {{ parent_record.total_items }}-item master
-                {% endif %}
+            <div class="paper-header">
+                <h2>{{ record.title }}</h2>
+                <div class="paper-meta">
+                    {% set subject_type = topics[0].get('subject_type') if topics else None %}
+                    {% if subject_type %}{{ subject_type.replace('nonlab','Non-Laboratory').replace('lab','Laboratory') }} &nbsp;·&nbsp; {% endif %}
+                    {{ record.total_items }} items total
+                    {% if record.is_derived and parent_record is defined and parent_record %}&nbsp;·&nbsp; selected from {{ parent_record.total_items }}-item master{% endif %}
+                </div>
             </div>
-        </div>
 
-        {# Table of Specification #}
-        {% set p_fam = topics[0].get('fam_pct', 50) if topics else 50 %}
-        {% set p_int = topics[0].get('int_pct', 30) if topics else 30 %}
-        {% set p_cre = topics[0].get('cre_pct', 20) if topics else 20 %}
+            {% set p_fam = topics[0].get('fam_pct', 50) if topics else 50 %}
+            {% set p_int = topics[0].get('int_pct', 30) if topics else 30 %}
+            {% set p_cre = topics[0].get('cre_pct', 20) if topics else 20 %}
 
-        <div class="section-label">Table of Specification</div>
+            <div class="section-label">Table of Specification</div>
+            <div style="font-size:12px;color:var(--text-sub);margin-bottom:10px;">
+                FAM {{ p_fam }}% &nbsp;/&nbsp; INT {{ p_int }}% &nbsp;/&nbsp; CRE {{ p_cre }}%
+                {% if record.is_derived %}<em style="color:var(--amber);">— Recomputed for {{ record.total_items }} selected items</em>{% endif %}
+            </div>
 
-        <div style="font-size:12px; color:var(--slate); margin-bottom:10px;">
-            Bloom distribution — FAM {{ p_fam }}% / INT {{ p_int }}% / CRE {{ p_cre }}%
-            {% if record.is_derived %}<em style="color:var(--amber);">  — Recomputed for {{ record.total_items }} selected items</em>{% endif %}
-        </div>
-
-        <table class="spec-table">
-            <thead>
-                <tr>
-                    <th rowspan="3" style="width:24%; vertical-align:middle;">Content Outline</th>
-                    <th rowspan="3" class="center" style="width:8%; vertical-align:middle;">Hours</th>
-                    <th class="center" colspan="2">Familiarization<br><span style="font-size:10px; font-weight:400;">(Remembering/Understanding) {{ p_fam }}%</span></th>
-                    <th class="center" colspan="2">Integration<br><span style="font-size:10px; font-weight:400;">(Applying/Analyzing) {{ p_int }}%</span></th>
-                    <th class="center" colspan="2">Creation<br><span style="font-size:10px; font-weight:400;">(Evaluating/Creating) {{ p_cre }}%</span></th>
-                    <th rowspan="3" class="center" style="width:7%; vertical-align:middle;">Total</th>
-                </tr>
-                <tr>
-                    <th class="center small">Items</th><th class="center small">Range</th>
-                    <th class="center small">Items</th><th class="center small">Range</th>
-                    <th class="center small">Items</th><th class="center small">Range</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% set totals = namespace(hrs=0, fam=0, intg=0, cre=0, tot=0) %}
-                {% for t in topics %}
-                    {% set totals.hrs  = totals.hrs  + (t.get('hours') or 0) %}
-                    {% set totals.fam  = totals.fam  + (t.get('fam')   or 0) %}
-                    {% set totals.intg = totals.intg + (t.get('int')   or 0) %}
-                    {% set totals.cre  = totals.cre  + (t.get('cre')   or 0) %}
-                    {% set totals.tot  = totals.tot  + (t.get('items') or t.get('quiz_items') or 0) %}
+            <table class="spec-table">
+                <thead>
                     <tr>
-                        <td>
-                            <strong>{{ t.get('topic') }}</strong>
-                            {% if t.get('learn_material') %}
-                                <div style="font-size:10px; color:#94a3b8; font-style:italic; margin-top:2px;">
-                                    {{ t.get('learn_material')[:80] }}{% if t.get('learn_material')|length > 80 %}…{% endif %}
-                                </div>
-                            {% endif %}
-                        </td>
-                        <td class="center">{{ t.get('hours') or 0 }}</td>
-                        <td class="center">{{ t.get('fam') or 0 }}</td>
-                        <td class="center small">{{ t.get('fam_range') or '' }}</td>
-                        <td class="center">{{ t.get('int') or 0 }}</td>
-                        <td class="center small">{{ t.get('int_range') or '' }}</td>
-                        <td class="center">{{ t.get('cre') or 0 }}</td>
-                        <td class="center small">{{ t.get('cre_range') or '' }}</td>
-                        <td class="center" style="font-weight:600;">{{ t.get('items') or t.get('quiz_items') or 0 }}</td>
+                        <th rowspan="3" style="width:24%;vertical-align:middle;">Content Outline / Topic</th>
+                        <th rowspan="3" class="center" style="width:8%;vertical-align:middle;">Hours</th>
+                        <th class="center" colspan="2">Familiarization<br><span style="font-size:10px;font-weight:400;">(Remembering/Understanding)</span><br><span style="font-size:10px;font-style:italic;">{{ p_fam }}%</span></th>
+                        <th class="center" colspan="2">Integration<br><span style="font-size:10px;font-weight:400;">(Applying/Analyzing)</span><br><span style="font-size:10px;font-style:italic;">{{ p_int }}%</span></th>
+                        <th class="center" colspan="2">Creation<br><span style="font-size:10px;font-weight:400;">(Evaluating/Creating)</span><br><span style="font-size:10px;font-style:italic;">{{ p_cre }}%</span></th>
+                        <th rowspan="3" class="center" style="width:7%;vertical-align:middle;">Total</th>
                     </tr>
-                {% endfor %}
-            </tbody>
-            <tfoot>
-                <tr>
-                    <td class="right"><strong>TOTAL</strong></td>
-                    <td class="center">{{ totals.hrs }}</td>
-                    <td class="center">{{ totals.fam }}</td><td></td>
-                    <td class="center">{{ totals.intg }}</td><td></td>
-                    <td class="center">{{ totals.cre }}</td><td></td>
-                    <td class="center">{{ totals.tot }}</td>
-                </tr>
-            </tfoot>
-        </table>
+                    <tr>
+                        <th class="center small">Items</th><th class="center small">Range</th>
+                        <th class="center small">Items</th><th class="center small">Range</th>
+                        <th class="center small">Items</th><th class="center small">Range</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% set totals = namespace(hrs=0,fam=0,intg=0,cre=0,tot=0) %}
+                    {% for t in topics %}
+                        {% set totals.hrs  = totals.hrs  + (t.get('hours') or 0) %}
+                        {% set totals.fam  = totals.fam  + (t.get('fam')   or 0) %}
+                        {% set totals.intg = totals.intg + (t.get('int')   or 0) %}
+                        {% set totals.cre  = totals.cre  + (t.get('cre')   or 0) %}
+                        {% set totals.tot  = totals.tot  + (t.get('items') or t.get('quiz_items') or 0) %}
+                        <tr>
+                            <td><strong>{{ t.get('topic') }}</strong>{% if t.get('learn_material') %}<div style="font-size:10px;color:var(--text-muted);font-style:italic;margin-top:2px;">Material: {{ t.get('learn_material')[:80] }}{% if t.get('learn_material')|length > 80 %}…{% endif %}</div>{% endif %}</td>
+                            <td class="center">{{ t.get('hours') or 0 }}</td>
+                            <td class="center">{{ t.get('fam') or 0 }}</td>
+                            <td class="center small">{{ t.get('fam_range') or '' }}</td>
+                            <td class="center">{{ t.get('int') or 0 }}</td>
+                            <td class="center small">{{ t.get('int_range') or '' }}</td>
+                            <td class="center">{{ t.get('cre') or 0 }}</td>
+                            <td class="center small">{{ t.get('cre_range') or '' }}</td>
+                            <td class="center" style="font-weight:600;">{{ t.get('items') or t.get('quiz_items') or 0 }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr>
+                        <td class="right"><strong>TOTAL</strong></td>
+                        <td class="center">{{ totals.hrs }}</td>
+                        <td class="center">{{ totals.fam }}</td><td></td>
+                        <td class="center">{{ totals.intg }}</td><td></td>
+                        <td class="center">{{ totals.cre }}</td><td></td>
+                        <td class="center">{{ totals.tot }}</td>
+                    </tr>
+                </tfoot>
+            </table>
 
-        {# Questions #}
-        <div class="section-label">Quiz Items</div>
+            <div class="section-label">Quiz Items</div>
 
-        {% if quizzes %}
-        <ol class="questions">
-            {% set ns = namespace(cur_test='') %}
-            {% for q in quizzes %}
-                {% set hdr = q.test_header or '' %}
-                {% if hdr and hdr != ns.cur_test %}
-                    <div style="margin-top:32px; margin-bottom:16px;">
-                        <h3 class="test-section-header">{{ hdr }}</h3>
-                        {% if q.test_description %}
-                            <p class="test-section-desc">{{ q.test_description }}</p>
-                        {% endif %}
-                    </div>
-                    {% set ns.cur_test = hdr %}
-                {% endif %}
-
-                <li>
-                    <div class="q-meta">
-                        Q{{ loop.index }} &nbsp;·&nbsp; {{ (q.type or '') | upper }}
-                        &nbsp;·&nbsp; {{ q.bloom or '—' }}
-                        &nbsp;·&nbsp; {{ q.concept or '—' }}
-                    </div>
-
-                    <div class="q-text">{{ q.question or '' }}</div>
-
-                    {% set correct_letter = namespace(val='') %}
-                    {% if q.type == 'mcq' and q.choices %}
-                        <ul class="choices">
-                            {% set ans_l = (q.answer or '') | lower %}
-                            {% for c in q.choices %}
-                                {% set letter = ['a','b','c','d','e'][loop.index0] %}
-                                {% set choice_l = (c or '') | lower %}
-                                {% set is_correct = (choice_l == ans_l) or (ans_l and ans_l in choice_l) or (ans_l == letter) %}
-                                {% if is_correct %}{% set correct_letter.val = letter %}{% endif %}
-                                <li class="{{ 'correct' if is_correct else '' }}">
-                                    <strong>{{ letter }})</strong> {{ c }}
-                                </li>
-                            {% endfor %}
-                        </ul>
-                    {% elif q.type == 'truefalse' %}
-                        <div class="tf-note">(True or False)</div>
+            {% if quizzes %}
+            <ol class="questions">
+                {% set ns = namespace(cur_test='') %}
+                {% for q in quizzes %}
+                    {% set hdr = q.test_header or '' %}
+                    {% if hdr and hdr != ns.cur_test %}
+                        <div style="margin-top:32px;margin-bottom:16px;">
+                            <h3 class="test-section-header">{{ hdr }}</h3>
+                            {% if q.test_description %}<p class="test-section-desc">{{ q.test_description }}</p>{% endif %}
+                        </div>
+                        {% set ns.cur_test = hdr %}
                     {% endif %}
-
-                    <div class="answer-block">
-                        <strong>Answer:</strong>
-                        {% if q.type == 'mcq' and correct_letter.val %}
-                            {{ correct_letter.val }}) {{ q.answer }}
-                        {% else %}
-                            {{ q.answer or '—' }}
+                    <li>
+                        <div class="q-meta">Q{{ loop.index }} &nbsp;·&nbsp; {{ (q.type or '') | upper }} &nbsp;·&nbsp; {{ q.bloom or '—' }} &nbsp;·&nbsp; {{ q.concept or '—' }}</div>
+                        <div class="q-text">{{ q.question or '' }}</div>
+                        {% set correct_letter = namespace(val='') %}
+                        {% if q.type == 'mcq' and q.choices %}
+                            <ul class="choices">
+                                {% set ans_l = (q.answer or '') | lower %}
+                                {% for c in q.choices %}
+                                    {% set letter = ['a','b','c','d','e'][loop.index0] %}
+                                    {% set choice_l = (c or '') | lower %}
+                                    {% set is_correct = (choice_l == ans_l) or (ans_l and ans_l in choice_l) or (ans_l == letter) %}
+                                    {% if is_correct %}{% set correct_letter.val = letter %}{% endif %}
+                                    <li class="{{ 'correct' if is_correct else '' }}"><strong>{{ letter }})</strong> {{ c }}</li>
+                                {% endfor %}
+                            </ul>
+                        {% elif q.type == 'truefalse' %}
+                            <div class="tf-note">(True or False)</div>
                         {% endif %}
-                        {% if q.answer_text %}
-                            <div class="answer-text">{{ q.answer_text }}</div>
-                        {% endif %}
-                    </div>
-                </li>
-            {% endfor %}
-        </ol>
-        {% else %}
-            <p style="color:var(--slate); font-style:italic; font-size:14px;">No quiz items found for this record.</p>
-        {% endif %}
+                        <div class="answer-block">
+                            <strong>Answer:</strong>
+                            {% if q.type == 'mcq' and correct_letter.val %}{{ correct_letter.val }}) {{ q.answer }}{% else %}{{ q.answer or '—' }}{% endif %}
+                            {% if q.answer_text %}<div class="answer-text">{{ q.answer_text }}</div>{% endif %}
+                        </div>
+                    </li>
+                {% endfor %}
+            </ol>
+            {% else %}
+            <p style="color:var(--text-sub);font-style:italic;font-size:14px;padding:20px 0;">No quiz items found for this record.</p>
+            {% endif %}
 
+            <div class="pv-actions">
+                <a href="{{ url_for('dashboard.index') }}" class="btn secondary">Close</a>
+                <button class="btn primary" onclick="window.print()">🖨 Print</button>
+            </div>
+        </div>
     </article>
 </div>
 
+<script>
+(function(){
+    var STORAGE_KEY='autotos-theme';
+    var html=document.documentElement;
+    var btn=document.getElementById('themeToggle');
+    var icon=document.getElementById('themeIcon');
+    var label=document.getElementById('themeLabel');
+    function applyTheme(t){
+        html.setAttribute('data-theme',t);
+        icon.textContent=t==='dark'?'☀️':'🌙';
+        label.textContent=t==='dark'?'Light':'Dark';
+        try{localStorage.setItem(STORAGE_KEY,t);}catch(e){}
+    }
+    var saved='light';
+    try{saved=localStorage.getItem(STORAGE_KEY)||'light';}catch(e){}
+    applyTheme(saved);
+    btn.addEventListener('click',function(){applyTheme(html.getAttribute('data-theme')==='dark'?'light':'dark');});
+})();
+</script>
 </body>
 </html>

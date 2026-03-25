@@ -22,10 +22,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const testTotalCount      = document.getElementById("testTotalCount");
     const loadingOverlay      = document.getElementById("loadingOverlay");
     const cancelGenerationBtn = document.getElementById("cancelGenerationBtn");
-    // Static toolbar buttons (always in DOM, outside the injected fragment)
     const staticCloseX        = document.getElementById('previewCloseX');
     const staticCloseBtn      = document.getElementById('quiz-preview-close');
     const staticSaveBtn       = document.getElementById('quiz-preview-save');
+
+    // ── Progress indicator elements ──
+    const spinnerCount    = document.getElementById('spinnerCount');
+    const loadingStatus   = document.getElementById('loadingStatus');
+    const progressBarFill = document.getElementById('progressBarFill');
+    const stepAnalyze     = document.getElementById('stepAnalyze');
+    const stepGenerate    = document.getElementById('stepGenerate');
+    const stepFinalize    = document.getElementById('stepFinalize');
 
     if (!addRowBtn || !generateBtn || !tosTable) {
         console.error("TOS: required elements missing.");
@@ -35,9 +42,122 @@ document.addEventListener("DOMContentLoaded", () => {
     let tests           = [];
     let abortController = null;
     let currentMasterId = null;
+    let progressInterval = null;  // tracks the counter timer
 
-    if (percentValidationMsg) {
-        percentValidationMsg.style.display = "none";
+    if (percentValidationMsg) percentValidationMsg.style.display = "none";
+
+    // ================================================================
+    // PROGRESS INDICATOR
+    // ================================================================
+    function startProgress(totalItems) {
+        let current = 0;
+        const total = totalItems || 10;
+
+        // Reset UI
+        if (spinnerCount)    spinnerCount.textContent  = '0';
+        if (loadingStatus)   loadingStatus.textContent = 'Analyzing materials…';
+        if (progressBarFill) progressBarFill.style.width = '0%';
+
+        setStep('analyze');
+
+        // Phase timing:
+        // 0–20% → Analyze (fast)
+        // 20–90% → Generate items one by one
+        // 90–100% → Finalize (fast)
+
+        const analyzeMs  = 1200;                        // 1.2s for analyze phase
+        const generateMs = Math.max(800, 80000 / total); // ~1s per item, capped
+        const finalizeMs = 800;
+
+        let phase = 'analyze';
+        let analyzeTimer = null;
+
+        // ── Phase 1: Analyze ──
+        let analyzeProgress = 0;
+        analyzeTimer = setInterval(() => {
+            analyzeProgress += 2;
+            const pct = Math.round((analyzeProgress / 100) * 20);  // 0→20%
+            setBar(pct);
+            if (analyzeProgress >= 100) {
+                clearInterval(analyzeTimer);
+                phase = 'generate';
+                setStep('generate');
+                startGeneratePhase();
+            }
+        }, analyzeMs / 50);
+
+        // ── Phase 2: Generate items ──
+        function startGeneratePhase() {
+            let itemsDone = 0;
+            progressInterval = setInterval(() => {
+                itemsDone++;
+                const pct = 20 + Math.round((itemsDone / total) * 70); // 20→90%
+                current = itemsDone;
+
+                if (spinnerCount)  spinnerCount.textContent  = current;
+                if (loadingStatus) loadingStatus.textContent =
+                    `Generating item ${current} of ${total}…`;
+                setBar(Math.min(pct, 90));
+
+                if (itemsDone >= total) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                    startFinalizePhase();
+                }
+            }, generateMs);
+        }
+
+        // ── Phase 3: Finalize ──
+        function startFinalizePhase() {
+            setStep('finalize');
+            if (loadingStatus) loadingStatus.textContent = 'Finalizing quiz…';
+
+            let fp = 90;
+            const finalTimer = setInterval(() => {
+                fp += 2;
+                setBar(Math.min(fp, 99));
+                if (fp >= 99) clearInterval(finalTimer);
+            }, finalizeMs / 5);
+        }
+    }
+
+    function stopProgress() {
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        // Complete the bar
+        if (progressBarFill) progressBarFill.style.width = '100%';
+        if (spinnerCount)    spinnerCount.textContent  = '✓';
+        if (loadingStatus)   loadingStatus.textContent = 'Done!';
+        setStep('finalize', true);
+    }
+
+    function resetProgress() {
+        if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+        if (spinnerCount)    spinnerCount.textContent  = '0';
+        if (loadingStatus)   loadingStatus.textContent = 'Starting up…';
+        if (progressBarFill) progressBarFill.style.width = '0%';
+        setStep('analyze');
+    }
+
+    function setBar(pct) {
+        if (progressBarFill) progressBarFill.style.width = pct + '%';
+    }
+
+    function setStep(active, allDone) {
+        const steps = { analyze: stepAnalyze, generate: stepGenerate, finalize: stepFinalize };
+        const order = ['analyze', 'generate', 'finalize'];
+        const activeIdx = order.indexOf(active);
+        order.forEach((key, i) => {
+            const el = steps[key];
+            if (!el) return;
+            el.classList.remove('active', 'done');
+            if (allDone) {
+                el.classList.add('done');
+            } else if (i < activeIdx) {
+                el.classList.add('done');
+            } else if (i === activeIdx) {
+                el.classList.add('active');
+            }
+        });
     }
 
     // ================================================================
@@ -55,7 +175,6 @@ document.addEventListener("DOMContentLoaded", () => {
         previewArea.style.display = 'flex';
         previewArea.setAttribute('aria-hidden', 'false');
         document.body.style.overflow = 'hidden';
-        // Scroll bond-paper to top
         setTimeout(() => {
             const sheet = previewArea.querySelector('.bondpaper');
             if (sheet) sheet.scrollTop = 0;
@@ -63,8 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ================================================================
-    // HELPER: fragment checkbox utilities
-    // (these operate on whatever is currently in #quiz-preview-card)
+    // FRAGMENT CHECKBOX UTILITIES
     // ================================================================
     function getFragmentCBs() {
         return Array.from(document.querySelectorAll('#quiz-preview-card .question-select-cb'));
@@ -98,7 +216,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // ================================================================
     // STATIC BUTTON LISTENERS
-    // (these elements are always in the DOM — no injection needed)
     // ================================================================
     if (staticCloseX)   staticCloseX.addEventListener('click', hidePreview);
     if (staticCloseBtn) staticCloseBtn.addEventListener('click', hidePreview);
@@ -111,61 +228,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ================================================================
-    // FULL EVENT DELEGATION ON previewArea
-    //
-    // WHY: insertAdjacentHTML() does NOT execute <script> tags.
-    // The partial has no script. All fragment interactivity must be
-    // wired here via bubbling on the stable previewArea container.
+    // EVENT DELEGATION ON previewArea
     // ================================================================
     if (previewArea) {
-
-        // ── Click delegation ──
         previewArea.addEventListener('click', function (ev) {
             const id = ev.target.id;
-
-            // --- Close / Done (fragment versions inside #quiz-preview-card) ---
-            if (id === 'quiz-preview-close') {
-                hidePreview();
-                return;
-            }
+            if (id === 'quiz-preview-close') { hidePreview(); return; }
             if (id === 'quiz-preview-save') {
                 const r = document.querySelector('input[name="redirect_after_save"]');
                 if (r && r.value) window.location = r.value;
                 else hidePreview();
                 return;
             }
+            if (id === 'preview-select-all-btn')   { setAllFragmentCBs(true);  return; }
+            if (id === 'preview-deselect-all-btn')  { setAllFragmentCBs(false); return; }
 
-            // --- Select All ---
-            if (id === 'preview-select-all-btn') {
-                setAllFragmentCBs(true);
-                return;
-            }
-
-            // --- Deselect All ---
-            if (id === 'preview-deselect-all-btn') {
-                setAllFragmentCBs(false);
-                return;
-            }
-
-            // --- Save Selected ---
             if (id === 'quiz-preview-save-selected') {
-                ev.preventDefault();
-                ev.stopPropagation();
-
+                ev.preventDefault(); ev.stopPropagation();
                 const checked = getFragmentCBs().filter(cb => cb.checked);
                 if (!checked.length) return;
-
                 const indices = checked.map(cb => parseInt(cb.dataset.qIndex, 10));
-                const btn     = ev.target;
-
-                btn.textContent      = 'Saving…';
-                btn.disabled         = true;
-                btn.style.background = '#d97706';
-
-                callSaveSelected(
-                    indices,
+                const btn = ev.target;
+                btn.textContent = 'Saving…'; btn.disabled = true; btn.style.background = '#d97706';
+                callSaveSelected(indices,
                     (result) => {
-                        btn.textContent      = `✓ Saved ${result.total_items} items!`;
+                        btn.textContent = `✓ Saved ${result.total_items} items!`;
                         btn.style.background = '#16a34a';
                         setTimeout(() => {
                             const r = document.querySelector('input[name="redirect_after_save"]');
@@ -175,16 +262,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     (msg) => {
                         alert('Save Selected failed: ' + msg);
-                        btn.textContent      = 'Save Selected';
-                        btn.style.background = '#d97706';
-                        btn.disabled         = false;
+                        btn.textContent = 'Save Selected'; btn.style.background = '#d97706'; btn.disabled = false;
                     }
                 );
                 return;
             }
         });
 
-        // ── Change delegation (checkboxes) ──
         previewArea.addEventListener('change', function (ev) {
             if (ev.target && ev.target.classList.contains('question-select-cb')) {
                 highlightFragmentItem(ev.target);
@@ -194,13 +278,12 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ================================================================
-    // MutationObserver — show preview when fragment is injected
+    // MutationObserver
     // ================================================================
     const obs = new MutationObserver((mutations) => {
         for (const m of mutations) {
             if (m.type === 'childList' && previewBody && previewBody.children.length > 0) {
                 showPreview();
-                // Sync count immediately after injection
                 setTimeout(updateFragmentCount, 0);
                 break;
             }
@@ -209,31 +292,19 @@ document.addEventListener("DOMContentLoaded", () => {
     if (previewBody) obs.observe(previewBody, { childList: true, subtree: false });
 
     // ================================================================
-    // callSaveSelected — POSTs to /dashboard/save_selected
+    // callSaveSelected
     // ================================================================
     async function callSaveSelected(selectedIndices, onSuccess, onError) {
-        if (!currentMasterId) {
-            onError("Master record ID is missing. Please regenerate the quiz.");
-            return;
-        }
-        if (!selectedIndices || selectedIndices.length === 0) {
-            onError("No questions selected.");
-            return;
-        }
+        if (!currentMasterId) { onError("Master record ID is missing. Please regenerate the quiz."); return; }
+        if (!selectedIndices || selectedIndices.length === 0) { onError("No questions selected."); return; }
         try {
             const resp = await fetch("/dashboard/save_selected", {
-                method:  "POST",
+                method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body:    JSON.stringify({
-                    parent_id:        currentMasterId,
-                    selected_indices: selectedIndices,
-                }),
+                body: JSON.stringify({ parent_id: currentMasterId, selected_indices: selectedIndices }),
             });
             const result = await resp.json();
-            if (!resp.ok || result.error) {
-                onError(result.error || `Server error: ${resp.status}`);
-                return;
-            }
+            if (!resp.ok || result.error) { onError(result.error || `Server error: ${resp.status}`); return; }
             onSuccess(result);
         } catch (err) {
             console.error("save_selected error:", err);
@@ -242,7 +313,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ================================================================
-    // HELPERS — hidden inputs
+    // HELPERS
     // ================================================================
     function _injectMasterIdInput(masterId) {
         if (!masterId) return;
@@ -266,7 +337,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // ================================================================
-    // CUSTOM PERCENT BLOCK SHOW/HIDE
+    // CUSTOM PERCENT BLOCK
     // ================================================================
     function updateCustomUI() {
         if (!subjectTypeSelect || !customPercentBlock) return;
@@ -275,10 +346,7 @@ document.addEventListener("DOMContentLoaded", () => {
         customPercentBlock.setAttribute('aria-hidden', show ? 'false' : 'true');
         if (!show && percentValidationMsg) percentValidationMsg.style.display = 'none';
     }
-    if (subjectTypeSelect) {
-        subjectTypeSelect.addEventListener('change', updateCustomUI);
-        updateCustomUI();
-    }
+    if (subjectTypeSelect) { subjectTypeSelect.addEventListener('change', updateCustomUI); updateCustomUI(); }
 
     // ================================================================
     // TOPIC TABLE
@@ -319,7 +387,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const title     = document.getElementById("tosTitle").value.trim();
         const totalQuiz = parseInt(document.getElementById("totalQuizItemsInput").value, 10);
 
-        if (!title)              { alert("Enter TOS title."); return; }
+        if (!title)                       { alert("Enter TOS title."); return; }
         if (!totalQuiz || totalQuiz <= 0) { alert("Enter a valid total number of quiz items."); return; }
 
         if (subjectTypeSelect && subjectTypeSelect.value === "custom") {
@@ -374,6 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (cancelGenerationBtn) {
         cancelGenerationBtn.onclick = () => {
             if (abortController) { abortController.abort(); abortController = null; }
+            resetProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'none';
             alert("Generation cancelled.");
         };
@@ -398,7 +467,13 @@ document.addEventListener("DOMContentLoaded", () => {
             });
 
             if (testModal) testModal.style.display = "none";
+
+            // Show overlay and START progress counter
+            const totalQuizItems = parseInt(document.getElementById("totalQuizItemsInput").value, 10);
+            resetProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'flex';
+            startProgress(totalQuizItems);
+
             submitTOSWithTests(tests);
         };
     }
@@ -430,6 +505,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (topics.length === 0) {
             alert("Add at least 1 valid topic.");
+            resetProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'none';
             return;
         }
@@ -449,6 +525,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 signal,
             });
 
+            // Stop and complete the progress bar
+            stopProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'none';
 
             if (!resp.ok) {
@@ -463,17 +541,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (data.master_id) currentMasterId = data.master_id;
 
-            // ── PATH A: server returned rendered preview HTML ──
+            // PATH A: server returned rendered preview HTML
             if (data.preview_html) {
                 _injectMasterIdInput(data.master_id);
                 if (data.redirect_url) _setRedirectInput(data.redirect_url);
-
-                // Inject HTML — NOTE: scripts inside won't execute (browser security).
-                // All interactivity is handled by delegation on previewArea above.
                 if (previewBody) {
                     previewBody.innerHTML = '';
                     previewBody.insertAdjacentHTML('beforeend', data.preview_html);
-                    // MutationObserver fires showPreview() + updateFragmentCount()
                 } else {
                     previewArea.innerHTML =
                         `<div class="bondpaper"><div class="preview-body" id="preview-body">${data.preview_html}</div></div>`;
@@ -485,7 +559,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if (data.redirect_url && !data.quizzes) { window.location = data.redirect_url; return; }
 
-            // ── PATH B: fallback JSON rendering ──
+            // PATH B: fallback JSON rendering
             if (data.quizzes || data.topics) {
                 renderTOS(data);
                 renderQuiz(data);
@@ -496,6 +570,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
         } catch (err) {
+            resetProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'none';
             if (err.name === 'AbortError') console.log("Fetch aborted.");
             else { console.error(err); alert("An error occurred. See console."); }
@@ -534,8 +609,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <td>${t.cre??0}</td><td>${t.cre_range??""}</td>
                 <td>${t.items??t.quiz_items??0}</td>`;
             body.appendChild(tr);
-            tH += t.hours||0; tF += t.fam||0; tI += t.int||0;
-            tC += t.cre||0;   tT += t.items||t.quiz_items||0;
+            tH += t.hours||0; tF += t.fam||0; tI += t.int||0; tC += t.cre||0; tT += t.items||t.quiz_items||0;
         });
         if (footTotalHrs) footTotalHrs.textContent = tH;
         if (footFamItems) footFamItems.textContent = tF;
@@ -552,7 +626,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const quizzes = data.quizzes || [];
         let curHeader = "";
 
-        // toolbar
         const toolbar = document.createElement("div");
         toolbar.innerHTML = `
             <div style="display:flex;align-items:center;gap:8px;margin:0 0 14px;padding:8px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;">
@@ -572,8 +645,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
 
             const wrap = document.createElement("div");
-            wrap.className = "quiz-item";
-            wrap.dataset.qIndex = idx + 1;
+            wrap.className = "quiz-item"; wrap.dataset.qIndex = idx + 1;
             wrap.style.cssText = "margin-bottom:18px;padding:14px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;display:flex;gap:12px;align-items:flex-start;transition:background 0.15s,box-shadow 0.15s;";
 
             const cb = document.createElement("input");
@@ -628,7 +700,7 @@ document.addEventListener("DOMContentLoaded", () => {
             quizArea.appendChild(actDiv);
         }
 
-        const selAllBtn  = document.getElementById("quiz-area-select-all");
+        const selAllBtn   = document.getElementById("quiz-area-select-all");
         const deselAllBtn = document.getElementById("quiz-area-deselect-all");
         if (selAllBtn)   selAllBtn.addEventListener("click",  () => setAllFallbackCBs(true));
         if (deselAllBtn) deselAllBtn.addEventListener("click", () => setAllFallbackCBs(false));
@@ -636,7 +708,7 @@ document.addEventListener("DOMContentLoaded", () => {
         updateFallbackCount();
     }
 
-    function getFallbackCBs()  { return Array.from(document.querySelectorAll("#quizArea .quiz-area-cb")); }
+    function getFallbackCBs() { return Array.from(document.querySelectorAll("#quizArea .quiz-area-cb")); }
 
     function updateFallbackCount() {
         const cbs = getFallbackCBs();
@@ -662,7 +734,6 @@ document.addEventListener("DOMContentLoaded", () => {
         const indices = checked.map(cb => parseInt(cb.dataset.qIndex, 10));
         const btn = document.getElementById("quiz-area-save-selected");
         if (btn) { btn.textContent = "Saving…"; btn.disabled = true; }
-
         await callSaveSelected(
             indices,
             (result) => {

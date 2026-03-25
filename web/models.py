@@ -62,7 +62,7 @@ class TosRecord(db.Model):
     quizzes_json = db.Column(db.Text, default="[]")
     total_items  = db.Column(db.Integer, default=0)
     date_created = db.Column(db.String(50))
-
+    subject_type = db.Column(db.String(20), default='nonlab')  # ← ADD THIS
     # ── Master / Derived relationship ──
     is_derived   = db.Column(db.Boolean, default=False, nullable=False)
     parent_id    = db.Column(db.Integer, db.ForeignKey("tos_records.id"), nullable=True)

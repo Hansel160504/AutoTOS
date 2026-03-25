@@ -758,6 +758,7 @@ def save_tos():
             quizzes_json=quizzes_json_safe,
             total_items=total_quiz,
             date_created=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            subject_type=subject_type,   # ← ADD THIS LINE
         )
 
         db.session.add(tos)

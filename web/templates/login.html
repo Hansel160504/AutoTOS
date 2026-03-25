@@ -8,469 +8,220 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
-/* ── Design tokens ── */
 :root {
-    --navy:        #1a2e4a;
-    --navy-deep:   #111f33;
-    --blue:        #2563eb;
-    --blue-light:  #dbeafe;
-    --blue-mid:    #3b82f6;
-    --slate:       #64748b;
-    --slate-light: #f1f5f9;
-    --border:      #e2e8f0;
-    --text:        #0f172a;
-    --white:       #ffffff;
-    --error:       #dc2626;
-    --error-bg:    #fef2f2;
-    --success:     #16a34a;
-    --success-bg:  #f0fdf4;
-    --radius:      10px;
-    --shadow-sm:   0 1px 3px rgba(0,0,0,0.08);
-    --shadow-md:   0 4px 16px rgba(0,0,0,0.10);
-    --shadow-lg:   0 20px 48px rgba(0,0,0,0.14);
+    --navy-deep: #111f33;
+    --blue:      #2563eb;
+    --slate:     #64748b;
+    --border:    #e2e8f0;
+    --text:      #0f172a;
+    --navy:      #1a2e4a;
+    --white:     #ffffff;
+    --error:     #dc2626;
+    --error-bg:  #fef2f2;
+    --success:   #16a34a;
+    --success-bg:#f0fdf4;
+    --radius:    10px;
 }
-
 * { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, sans-serif; color: var(--text); }
 
-body {
-    font-family: 'DM Sans', system-ui, sans-serif;
-    background: var(--slate-light);
-    color: var(--text);
-    min-height: 100vh;
-    display: flex;
-    align-items: stretch;
-}
+/* ── Layout ── */
+.auth-wrap { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
-/* ── Split layout ── */
-.auth-wrap {
-    display: flex;
-    width: 100%;
-    min-height: 100vh;
-}
-
-/* ── Left branding panel ── */
+/* ── Left panel ── */
 .brand-panel {
-    width: 44%;
+    width: 44%; height: 100vh;
     background: var(--navy-deep);
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    padding: 52px 48px;
-    position: relative;
-    overflow: hidden;
+    padding: 48px 52px;
+    position: relative; overflow: hidden;
+    display: flex; flex-direction: column;
 }
-
-/* Geometric background pattern */
 .brand-panel::before {
-    content: '';
-    position: absolute;
-    inset: 0;
+    content: ''; position: absolute; inset: 0; pointer-events: none;
     background:
         radial-gradient(ellipse 80% 60% at 20% 80%, rgba(37,99,235,0.18) 0%, transparent 70%),
         radial-gradient(ellipse 60% 40% at 80% 20%, rgba(59,130,246,0.12) 0%, transparent 60%);
 }
-
 .brand-panel::after {
-    content: '';
-    position: absolute;
-    top: -120px; right: -120px;
+    content: ''; position: absolute; top: -120px; right: -120px;
     width: 380px; height: 380px;
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.05); border-radius: 50%; pointer-events: none;
 }
 
-.bp-inner {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    justify-content: space-between;
-}
-
+/* Logo — top, in flow */
 .bp-logo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-}
-
-.bp-logo-mark {
-    width: 40px;
-    height: 40px;
-    background: var(--blue);
-    border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'DM Serif Display', serif;
-    font-size: 20px;
-    color: white;
-    font-weight: 400;
+    position: relative; z-index: 1;
+    display: flex; align-items: center; gap: 12px;
     flex-shrink: 0;
 }
-
-.bp-logo-text {
-    font-family: 'DM Serif Display', serif;
-    font-size: 22px;
-    color: white;
-    letter-spacing: -0.3px;
+.bp-logo-mark {
+    width: 44px; height: 44px; background: var(--blue); border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif; font-size: 22px; color: white;
 }
-
+.bp-logo-text { font-family: 'DM Serif Display', serif; font-size: 24px; color: white; }
 .bp-logo-text span { color: #60a5fa; }
 
+/* Hero — fills remaining space, centers content */
 .bp-hero {
-    margin-top: auto;
-    padding-bottom: 8px;
+    position: relative; z-index: 1;
+    flex: 1;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    text-align: center;
+    margin-top: -60px;
 }
-
 .bp-headline {
     font-family: 'DM Serif Display', serif;
-    font-size: 38px;
-    line-height: 1.18;
-    color: white;
-    letter-spacing: -0.5px;
-    margin-bottom: 16px;
+    font-size: 50px; line-height: 1.15; color: white;
+    letter-spacing: -0.5px; margin-bottom: 20px;
 }
+.bp-headline em { font-style: italic; color: #93c5fd; }
+.bp-sub { font-size: 16px; color: #94a3b8; line-height: 1.65; max-width: 360px; }
+.bp-features { margin-top: 36px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.bp-feat { display: flex; align-items: center; gap: 12px; font-size: 15px; color: #cbd5e1; }
+.bp-feat-dot { width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; flex-shrink: 0; }
 
-.bp-headline em {
-    font-style: italic;
-    color: #93c5fd;
-}
-
-.bp-sub {
-    font-size: 14px;
-    color: #94a3b8;
-    line-height: 1.6;
-    max-width: 320px;
-}
-
-.bp-features {
-    margin-top: 36px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.bp-feat {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    color: #cbd5e1;
-}
-
-.bp-feat-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: #3b82f6;
-    flex-shrink: 0;
-}
-
+/* Footer — bottom, in flow */
 .bp-footer {
-    font-size: 12px;
-    color: #475569;
-    border-top: 1px solid rgba(255,255,255,0.07);
-    padding-top: 20px;
+    position: relative; z-index: 1;
+    flex-shrink: 0;
+    font-size: 12px; color: #475569;
+    border-top: 1px solid rgba(255,255,255,0.07); padding-top: 20px;
 }
 
-/* ── Right form panel ── */
+/* ── Right panel ── */
 .form-panel {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 48px 40px;
+    flex: 1; height: 100vh; overflow: hidden;
     background: var(--white);
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px;
 }
-
-.form-card {
-    width: 100%;
-    max-width: 400px;
+.form-card { width: 100%; max-width: 420px; animation: slideUp 0.4s ease both; }
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
 }
-
-.form-card-header {
-    margin-bottom: 32px;
-}
-
+.form-card-header { margin-bottom: 32px; }
 .form-card-header h1 {
     font-family: 'DM Serif Display', serif;
-    font-size: 28px;
-    color: var(--navy-deep);
-    letter-spacing: -0.3px;
-    margin-bottom: 6px;
+    font-size: 36px; color: var(--navy-deep); letter-spacing: -0.3px; margin-bottom: 8px;
 }
+.form-card-header p { font-size: 15px; color: var(--slate); line-height: 1.5; }
 
-.form-card-header p {
-    font-size: 14px;
-    color: var(--slate);
-    line-height: 1.5;
-}
-
-/* Flash messages */
 .flash-msg {
-    padding: 10px 14px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    padding: 11px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    margin-bottom: 20px; display: flex; align-items: center; gap: 8px;
 }
 .flash-msg.error   { background: var(--error-bg);   color: var(--error);   border: 1px solid #fecaca; }
 .flash-msg.success { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }
 
-/* Form fields */
-.field {
-    margin-bottom: 18px;
-}
-
-.field label {
-    display: block;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--navy);
-    margin-bottom: 6px;
-    letter-spacing: 0.1px;
-}
-
+.field { margin-bottom: 20px; }
+.field label { display: block; font-size: 13px; font-weight: 600; color: var(--navy); margin-bottom: 7px; }
 .field input {
-    width: 100%;
-    padding: 11px 14px;
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    color: var(--text);
-    background: var(--white);
+    width: 100%; padding: 13px 16px;
+    border: 1.5px solid var(--border); border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 15px; color: var(--text);
+    background: var(--white); outline: none;
     transition: border-color 0.15s, box-shadow 0.15s;
-    outline: none;
 }
-
-.field input:focus {
-    border-color: var(--blue);
-    box-shadow: 0 0 0 3px rgba(37,99,235,0.10);
-}
-
+.field input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37,99,235,0.10); }
 .field input::placeholder { color: #94a3b8; }
 
-/* Buttons */
 .btn-primary {
-    width: 100%;
-    padding: 12px 20px;
-    background: var(--blue);
-    color: white;
-    border: none;
-    border-radius: var(--radius);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    letter-spacing: 0.2px;
+    width: 100%; padding: 14px 20px;
+    background: var(--blue); color: white; border: none; border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 600; cursor: pointer;
     transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
-    box-shadow: 0 1px 4px rgba(37,99,235,0.25);
-    margin-top: 4px;
+    box-shadow: 0 1px 4px rgba(37,99,235,0.25); margin-top: 4px;
 }
-
-.btn-primary:hover {
-    background: #1d4ed8;
-    box-shadow: 0 4px 12px rgba(37,99,235,0.30);
-}
-
+.btn-primary:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.30); }
 .btn-primary:active { transform: translateY(1px); }
 
-.btn-secondary {
-    width: 100%;
-    padding: 11px 20px;
-    background: var(--white);
-    color: var(--navy);
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s;
-    margin-top: 10px;
-    display: block;
-    text-align: center;
-    text-decoration: none;
-}
-
-.btn-secondary:hover {
-    background: var(--slate-light);
-    border-color: #cbd5e1;
-}
-
-/* Divider */
 .divider {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 20px 0;
-    font-size: 12px;
-    color: #94a3b8;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
+    display: flex; align-items: center; gap: 12px; margin: 22px 0;
+    font-size: 12px; color: #94a3b8; font-weight: 500;
+    text-transform: uppercase; letter-spacing: 0.6px;
 }
+.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
-.divider::before,
-.divider::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border);
-}
-
-/* Google button */
 .btn-google {
-    width: 100%;
-    padding: 11px 20px;
-    background: var(--white);
-    color: #374151;
-    border: 1.5px solid var(--border);
-    border-radius: var(--radius);
-    font-family: 'DM Sans', sans-serif;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s, box-shadow 0.15s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
+    width: 100%; padding: 13px 20px;
+    background: var(--white); color: #374151;
+    border: 1.5px solid var(--border); border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer;
+    transition: background 0.15s; display: flex; align-items: center; justify-content: center; gap: 10px;
 }
+.btn-google:hover { background: #f9fafb; }
 
-.btn-google:hover {
-    background: #f9fafb;
-    box-shadow: var(--shadow-sm);
-}
-
-.form-footer {
-    margin-top: 24px;
-    text-align: center;
-    font-size: 13px;
-    color: var(--slate);
-}
-
-.form-footer a {
-    color: var(--blue);
-    font-weight: 600;
-    text-decoration: none;
-}
-
+.form-footer { margin-top: 26px; text-align: center; font-size: 14px; color: var(--slate); }
+.form-footer a { color: var(--blue); font-weight: 600; text-decoration: none; }
 .form-footer a:hover { text-decoration: underline; }
 
-/* Responsive */
 @media (max-width: 768px) {
+    html, body { overflow: auto; }
+    .auth-wrap { flex-direction: column; height: auto; overflow: auto; }
     .brand-panel { display: none; }
-    .form-panel  { padding: 32px 24px; }
-}
-
-/* Page load animation */
-.form-card { animation: slideUp 0.4s ease both; }
-@keyframes slideUp {
-    from { opacity: 0; transform: translateY(16px); }
-    to   { opacity: 1; transform: translateY(0); }
+    .form-panel { width: 100%; height: auto; min-height: 100vh; overflow: auto; padding: 48px 24px; }
 }
 </style>
 </head>
 <body>
-
 <div class="auth-wrap">
-
-    <!-- Left branding panel -->
-    <div class="brand-panel">
-        <div class="bp-inner">
-            <div class="bp-logo">
-                <div class="bp-logo-mark">A</div>
-                <div class="bp-logo-text">Auto<span>TOS</span></div>
-            </div>
-
-            <div class="bp-hero">
-                <h2 class="bp-headline">
-                    Generate exams<br>
-                    with <em>precision</em><br>
-                    and purpose.
-                </h2>
-                <p class="bp-sub">
-                    AutoTOS helps university faculty create Table of Specifications
-                    and AI-powered exam questions aligned to Bloom's Taxonomy.
-                </p>
-
-                <div class="bp-features">
-                    <div class="bp-feat">
-                        <div class="bp-feat-dot"></div>
-                        Bloom's Taxonomy aligned question generation
-                    </div>
-                    <div class="bp-feat">
-                        <div class="bp-feat-dot"></div>
-                        Upload learning materials — PDF, DOCX, PPTX
-                    </div>
-                    <div class="bp-feat">
-                        <div class="bp-feat-dot"></div>
-                        Master banks with selective derived exams
-                    </div>
-                </div>
-            </div>
-
-            <div class="bp-footer">
-                AutoTOS &nbsp;·&nbsp; University Exam Generator
-            </div>
-        </div>
+  <div class="brand-panel">
+    <div class="bp-logo">
+      <div class="bp-logo-mark">A</div>
+      <div class="bp-logo-text">Auto<span>TOS</span></div>
     </div>
 
-    <!-- Right form panel -->
-    <div class="form-panel">
-        <div class="form-card">
-
-            <div class="form-card-header">
-                <h1>Welcome back</h1>
-                <p>Sign in to your faculty account to continue.</p>
-            </div>
-
-            {% with messages = get_flashed_messages(with_categories=true) %}
-              {% if messages %}
-                {% for category, message in messages %}
-                  <div class="flash-msg {{ category }}">
-                    {{ '⚠' if category == 'error' else '✓' }} {{ message }}
-                  </div>
-                {% endfor %}
-              {% endif %}
-            {% endwith %}
-
-            <form action="/login" method="POST">
-                <div class="field">
-                    <label for="email">Email address</label>
-                    <input type="email" id="email" name="email"
-                           placeholder="you@university.edu" required autocomplete="email">
-                </div>
-
-                <div class="field">
-                    <label for="password">Password</label>
-                    <input type="password" id="password" name="password"
-                           placeholder="Enter your password" required autocomplete="current-password">
-                </div>
-
-                <button class="btn-primary" type="submit">Sign In</button>
-            </form>
-
-            <div class="divider">or</div>
-
-            <button class="btn-google" onclick="alert('Google Login not implemented yet')">
-                <img src="https://www.svgrepo.com/show/355037/google.svg" width="18" alt="Google">
-                Continue with Google
-            </button>
-
-            <div class="form-footer">
-                Don't have an account? <a href="/signup">Create one</a>
-            </div>
-
-        </div>
+    <div class="bp-hero">
+      <h2 class="bp-headline">Generate exams<br>with <em>precision</em><br>and purpose.</h2>
+      <p class="bp-sub">AutoTOS helps university faculty create Table of Specifications and AI-powered exam questions aligned to Bloom's Taxonomy.</p>
+      <div class="bp-features">
+        <div class="bp-feat"><div class="bp-feat-dot"></div>Bloom's Taxonomy aligned question generation</div>
+        <div class="bp-feat"><div class="bp-feat-dot"></div>Upload learning materials — PDF, DOCX, PPTX</div>
+        <div class="bp-feat"><div class="bp-feat-dot"></div>Master banks with selective derived exams</div>
+      </div>
     </div>
 
+    <div class="bp-footer">AutoTOS &nbsp;·&nbsp; University Exam Generator</div>
+  </div>
+
+  <div class="form-panel">
+    <div class="form-card">
+      <div class="form-card-header">
+        <h1>Welcome back</h1>
+        <p>Sign in to your faculty account to continue.</p>
+      </div>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-msg {{ category }}">{{ '⚠' if category == 'error' else '✓' }} {{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form action="/login" method="POST">
+        <div class="field">
+          <label for="email">Email address</label>
+          <input type="email" id="email" name="email" placeholder="you@university.edu" required autocomplete="email">
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" placeholder="Enter your password" required autocomplete="current-password">
+        </div>
+        <button class="btn-primary" type="submit">Sign In</button>
+      </form>
+
+      <div class="divider">or</div>
+      <button class="btn-google" onclick="alert('Google Login not implemented yet')">
+        <img src="https://www.svgrepo.com/show/355037/google.svg" width="18" alt="Google">
+        Continue with Google
+      </button>
+      <div class="form-footer">Don't have an account? <a href="/signup">Create one</a></div>
+    </div>
+  </div>
 </div>
 </body>
 </html>

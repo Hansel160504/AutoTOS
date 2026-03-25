@@ -1,26 +1,66 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Records – AutoTOS Admin</title>
+<!-- ▸ ANTI-FLASH -->
+<script>
+(function(){try{var t=localStorage.getItem('autotos-theme');if(t==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}}());
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+/* ══ LIGHT ══ */
 :root{
     --navy-deep:#111f33;--blue:#2563eb;--blue-light:#dbeafe;
-    --slate:#64748b;--slate-light:#f1f5f9;--border:#e2e8f0;
-    --text:#0f172a;--white:#fff;
+    --slate:#64748b;--border:#e2e8f0;--text:#0f172a;--white:#fff;
     --amber:#d97706;--amber-light:#fef3c7;--amber-border:#fcd34d;
     --red:#dc2626;--red-light:#fee2e2;
     --green:#16a34a;--green-light:#dcfce7;
     --radius:10px;--shadow:0 1px 4px rgba(0,0,0,.07);
-}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'DM Sans',system-ui,sans-serif;background:var(--slate-light);color:var(--text);min-height:100vh}
 
-header{background:var(--navy-deep);height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+    --bg-page:    #f1f5f9;
+    --bg-card:    #ffffff;
+    --bg-thead:   #f8fafc;
+    --bg-input:   #ffffff;
+    --bg-derived: #fffdf5;
+    --text-main:  #0f172a;
+    --text-sub:   #64748b;
+    --text-muted: #94a3b8;
+    --border-col: #e2e8f0;
+    --row-hover:  #fafbfd;
+    --row-border: #f1f5f9;
+    --header-bg:  #111f33;
+}
+/* ══ DARK ══ */
+[data-theme="dark"]{
+    --navy-deep:  #e2e8f0;--blue:#3b82f6;--blue-light:#1e3a5f;
+    --slate:#94a3b8;--border:#334155;--text:#f1f5f9;--white:#1e293b;
+    --amber:#f59e0b;--amber-light:#2d1f06;--amber-border:#92400e;
+    --red:#f87171;--red-light:#2d0a0a;
+    --green:#22c55e;--green-light:#052e16;
+
+    --bg-page:    #0f172a;
+    --bg-card:    #1e293b;
+    --bg-thead:   #162032;
+    --bg-input:   #0f172a;
+    --bg-derived: #1c1709;
+    --text-main:  #f1f5f9;
+    --text-sub:   #94a3b8;
+    --text-muted: #475569;
+    --border-col: #334155;
+    --row-hover:  #273348;
+    --row-border: #253044;
+    --header-bg:  #080f1a;
+    --shadow:     0 1px 4px rgba(0,0,0,0.3);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',system-ui,sans-serif;background:var(--bg-page);color:var(--text-main);min-height:100vh;transition:background 0.25s,color 0.25s}
+
+header{background:var(--header-bg);height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,.3)}
 .logo{display:flex;align-items:center;gap:10px;text-decoration:none}
 .logo-mark{width:34px;height:34px;background:var(--red);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:17px;color:#fff}
 .logo-text{font-family:'DM Serif Display',serif;font-size:19px;color:#fff}
@@ -33,81 +73,84 @@ nav a.active{background:rgba(220,38,38,.2);color:#fca5a5;font-weight:600}
 nav a.logout{border:1px solid rgba(255,255,255,.1);margin-left:6px}
 nav a.logout:hover{background:rgba(220,38,38,.15);color:#fca5a5}
 
+/* Theme toggle */
+.theme-toggle{display:flex;align-items:center;gap:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:5px 12px 5px 8px;cursor:pointer;transition:background .15s;margin-left:8px;flex-shrink:0}
+.theme-toggle:hover{background:rgba(255,255,255,0.12)}
+.theme-toggle-track{width:32px;height:17px;background:#334155;border-radius:20px;position:relative;transition:background .25s;flex-shrink:0}
+[data-theme="dark"] .theme-toggle-track{background:var(--blue)}
+.theme-toggle-thumb{position:absolute;top:2px;left:2px;width:13px;height:13px;background:white;border-radius:50%;transition:transform .25s cubic-bezier(.4,0,.2,1)}
+[data-theme="dark"] .theme-toggle-thumb{transform:translateX(15px)}
+.theme-toggle-icon{font-size:13px}
+.theme-toggle-label{font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap}
+[data-theme="dark"] .theme-toggle-label{color:#93c5fd}
+
 .page{max-width:1300px;margin:0 auto;padding:28px 20px 60px}
 .page-hero{margin-bottom:24px}
 .page-hero h2{font-family:'DM Serif Display',serif;font-size:24px;color:var(--navy-deep);margin-bottom:4px}
-.page-hero p{font-size:13px;color:var(--slate)}
+.page-hero p{font-size:13px;color:var(--text-sub)}
 
 .flash{padding:10px 14px;margin-bottom:14px;border-radius:8px;font-size:13px;font-weight:600}
 .flash.success{background:var(--green-light);color:var(--green)}
 .flash.error{background:var(--red-light);color:var(--red)}
 
-.card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
-.card-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.card{background:var(--bg-card);border:1px solid var(--border-col);border-radius:var(--radius);box-shadow:var(--shadow);transition:background .25s,border-color .25s}
+.card-head{padding:14px 18px;border-bottom:1px solid var(--border-col);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .card-head h3{font-size:14px;font-weight:700;color:var(--navy-deep);flex:1}
 
-/* Search */
 .search-form{display:flex;gap:8px;align-items:center}
-.search-input{padding:7px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;width:260px;transition:border-color .15s}
+.search-input{padding:7px 12px;border:1.5px solid var(--border-col);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;width:260px;transition:border-color .15s,background .25s;background:var(--bg-input);color:var(--text-main)}
 .search-input:focus{border-color:var(--blue)}
 .search-btn{padding:7px 14px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer}
-.search-clear{font-size:12px;color:var(--slate);text-decoration:none;font-weight:600}
+.search-clear{font-size:12px;color:var(--text-sub);text-decoration:none;font-weight:600}
 .search-clear:hover{color:var(--red)}
 
-/* Table */
 table{width:100%;border-collapse:collapse;font-size:13px}
-thead th{padding:9px 14px;background:#f8fafc;font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:.4px;color:var(--slate);text-align:left;border-bottom:1px solid var(--border)}
-tbody tr.master-row{border-top:2px solid #f1f5f9}
+thead th{padding:9px 14px;background:var(--bg-thead);font-size:11px;text-transform:uppercase;font-weight:700;letter-spacing:.4px;color:var(--text-sub);text-align:left;border-bottom:1px solid var(--border-col)}
+tbody tr.master-row{border-top:2px solid var(--row-border)}
 tbody tr.master-row:first-child{border-top:none}
-tbody td{padding:14px;vertical-align:top}
-tbody tr.master-row:hover td{background:#fafbfd}
+tbody td{padding:14px;vertical-align:top;color:var(--text-main)}
+tbody tr.master-row:hover td{background:var(--row-hover)}
 
-/* Master cell */
-.master-title{font-weight:700;font-size:13px;color:var(--text);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
-.master-meta{font-size:11px;color:var(--slate);margin-top:2px}
+.master-title{font-weight:700;font-size:13px;color:var(--text-main);display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+.master-meta{font-size:11px;color:var(--text-sub);margin-top:2px}
 
-/* Derived list */
 .derived-list{display:flex;flex-direction:column;gap:6px}
-.derived-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;background:#fffdf5;border:1px solid var(--amber-border);border-left:3px solid var(--amber);border-radius:6px}
-.d-title{font-weight:600;font-size:12px;flex:1;min-width:80px}
+.derived-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 10px;background:var(--bg-derived);border:1px solid var(--amber-border);border-left:3px solid var(--amber);border-radius:6px}
+.d-title{font-weight:600;font-size:12px;flex:1;min-width:80px;color:var(--text-main)}
 .d-count{font-size:11px;color:var(--amber);font-weight:700;white-space:nowrap}
-.d-date{font-size:10px;color:var(--slate);white-space:nowrap}
-.no-derived{font-size:12px;color:#cbd5e1;font-style:italic}
+.d-date{font-size:10px;color:var(--text-sub);white-space:nowrap}
+.no-derived{font-size:12px;color:var(--text-muted);font-style:italic}
 
-/* Owner */
-.own-name{font-weight:600;font-size:13px}
-.own-email{font-size:11px;color:var(--slate);margin-top:2px}
+.own-name{font-weight:600;font-size:13px;color:var(--text-main)}
+.own-email{font-size:11px;color:var(--text-sub);margin-top:2px}
 
-/* Stats */
 .stats-block{display:flex;flex-direction:column;gap:4px}
 .s-row{display:flex;align-items:baseline;gap:4px}
 .s-num{font-family:'DM Serif Display',serif;font-size:18px;color:var(--blue);line-height:1}
 .s-num.amber{color:var(--amber)}
-.s-lbl{font-size:10px;color:var(--slate);text-transform:uppercase}
+.s-lbl{font-size:10px;color:var(--text-sub);text-transform:uppercase}
 
-/* Badges */
 .badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
-.badge.master  {background:var(--blue-light);color:var(--blue)}
-.badge.derived {background:var(--amber-light);color:var(--amber)}
+.badge.master {background:var(--blue-light);color:var(--blue)}
+.badge.derived{background:var(--amber-light);color:var(--amber)}
 
-/* Buttons */
 .btn{display:inline-block;padding:4px 10px;border-radius:6px;border:none;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;text-decoration:none;white-space:nowrap;transition:filter .15s;text-transform:uppercase;letter-spacing:.3px}
 .btn:hover{filter:brightness(.88)}
 .btn.view  {background:var(--blue);color:#fff}
 .btn.danger{background:var(--red);color:#fff}
 .master-actions{display:flex;gap:5px}
 
-.date-cell{font-size:12px;color:var(--slate)}
-.row-num{color:var(--slate);font-size:12px}
+.date-cell{font-size:12px;color:var(--text-sub)}
+.row-num{color:var(--text-sub);font-size:12px}
 
-/* Pagination */
 .pagination{display:flex;align-items:center;justify-content:center;gap:4px;padding:18px;flex-wrap:wrap}
-.pagination a,.pagination span{padding:6px 12px;border:1px solid var(--border);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;text-decoration:none;color:var(--text);background:var(--white);transition:background .15s}
+.pagination a,.pagination span{padding:6px 12px;border:1px solid var(--border-col);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;text-decoration:none;color:var(--text-main);background:var(--bg-card);transition:background .15s}
 .pagination a:hover{background:var(--blue-light);border-color:var(--blue);color:var(--blue)}
 .pagination .current{background:var(--blue);color:#fff;border-color:var(--blue)}
 .pagination .disabled{opacity:.4;pointer-events:none}
 
-.empty-state{padding:40px;text-align:center;color:var(--slate);font-size:14px}
+.empty-state{padding:40px;text-align:center;color:var(--text-sub);font-size:14px}
+@media(max-width:700px){.theme-toggle-label{display:none}}
 </style>
 </head>
 <body>
@@ -123,22 +166,23 @@ tbody tr.master-row:hover td{background:#fafbfd}
         <a href="{{ url_for('admin.users') }}">Users</a>
         <a href="{{ url_for('admin.records') }}" class="active">Records</a>
         <a href="{{ url_for('auth.logout') }}" class="logout">Logout</a>
+
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+            <div class="theme-toggle-track"><div class="theme-toggle-thumb"></div></div>
+            <span class="theme-toggle-icon" id="themeIcon">🌙</span>
+            <span class="theme-toggle-label" id="themeLabel">Dark</span>
+        </button>
     </nav>
 </header>
 
 <div class="page">
     <div class="page-hero">
         <h2>All TOS Records</h2>
-        <p>
-            {{ paginated.total }} master bank{{ 's' if paginated.total != 1 else '' }} across all users
-            {% if search %} — filtered by "{{ search }}"{% endif %}
-        </p>
+        <p>{{ paginated.total }} master bank{{ 's' if paginated.total != 1 else '' }} across all users{% if search %} — filtered by "{{ search }}"{% endif %}</p>
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}{% for cat, msg in messages %}
-        <div class="flash {{ cat }}">{{ msg }}</div>
-      {% endfor %}{% endif %}
+      {% if messages %}{% for cat, msg in messages %}<div class="flash {{ cat }}">{{ msg }}</div>{% endfor %}{% endif %}
     {% endwith %}
 
     <div class="card">
@@ -170,16 +214,11 @@ tbody tr.master-row:hover td{background:#fafbfd}
             {% set children = row.children %}
             <tr class="master-row">
                 <td class="row-num">{{ (paginated.page - 1) * paginated.per_page + loop.index }}</td>
-
                 <td>
-                    <div class="master-title">
-                        {{ master.title }}
-                        <span class="badge master">Master</span>
-                    </div>
+                    <div class="master-title">{{ master.title }}<span class="badge master">Master</span></div>
                     <div class="master-meta">ID: #{{ master.id }}</div>
                     <div class="master-meta">{{ master.total_items }} item{{ 's' if master.total_items != 1 else '' }}</div>
                 </td>
-
                 <td>
                     {% if children %}
                     <div class="derived-list">
@@ -190,8 +229,7 @@ tbody tr.master-row:hover td{background:#fafbfd}
                             <span class="d-date">{{ (child.date_created or '')[:10] }}</span>
                             <span class="badge derived">Derived</span>
                             <a class="btn view" href="{{ url_for('dashboard.view_tos', id=child.id) }}" target="_blank">View</a>
-                            <form action="{{ url_for('admin.delete_record', record_id=child.id) }}" method="post"
-                                  data-confirm="Delete derived exam '{{ child.title }}'?">
+                            <form action="{{ url_for('admin.delete_record', record_id=child.id) }}" method="post" data-confirm="Delete derived exam '{{ child.title }}'?">
                                 <button type="submit" class="btn danger">Del</button>
                             </form>
                         </div>
@@ -201,26 +239,18 @@ tbody tr.master-row:hover td{background:#fafbfd}
                     <span class="no-derived">No derived exams yet</span>
                     {% endif %}
                 </td>
-
-                <td>
-                    <div class="own-name">{{ row.user_name }}</div>
-                    <div class="own-email">{{ row.user_email }}</div>
-                </td>
-
+                <td><div class="own-name">{{ row.user_name }}</div><div class="own-email">{{ row.user_email }}</div></td>
                 <td>
                     <div class="stats-block">
                         <div class="s-row"><span class="s-num">{{ master.total_items }}</span><span class="s-lbl">items</span></div>
                         <div class="s-row"><span class="s-num amber">{{ children | length }}</span><span class="s-lbl">derived</span></div>
                     </div>
                 </td>
-
                 <td class="date-cell">{{ (master.date_created or '—')[:10] }}</td>
-
                 <td>
                     <div class="master-actions">
                         <a class="btn view" href="{{ url_for('dashboard.view_tos', id=master.id) }}" target="_blank">View</a>
-                        <form action="{{ url_for('admin.delete_record', record_id=master.id) }}" method="post"
-                              data-confirm="Delete '{{ master.title }}' and all {{ children|length }} derived exam(s)? This cannot be undone.">
+                        <form action="{{ url_for('admin.delete_record', record_id=master.id) }}" method="post" data-confirm="Delete '{{ master.title }}' and all {{ children|length }} derived exam(s)? This cannot be undone.">
                             <button type="submit" class="btn danger">Delete</button>
                         </form>
                     </div>
@@ -232,35 +262,42 @@ tbody tr.master-row:hover td{background:#fafbfd}
 
         {% if paginated.pages > 1 %}
         <div class="pagination">
-            {% if paginated.has_prev %}
-            <a href="{{ url_for('admin.records', page=paginated.prev_num, q=search) }}">‹ Prev</a>
-            {% else %}<span class="disabled">‹ Prev</span>{% endif %}
-
-            {% for p in paginated.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
-                {% if p %}
-                    {% if p == paginated.page %}<span class="current">{{ p }}</span>
-                    {% else %}<a href="{{ url_for('admin.records', page=p, q=search) }}">{{ p }}</a>{% endif %}
-                {% else %}<span style="padding:0 4px;color:var(--slate)">…</span>{% endif %}
+            {% if paginated.has_prev %}<a href="{{ url_for('admin.records', page=paginated.prev_num, q=search) }}">‹ Prev</a>{% else %}<span class="disabled">‹ Prev</span>{% endif %}
+            {% for p in paginated.iter_pages(left_edge=1,right_edge=1,left_current=2,right_current=2) %}
+                {% if p %}{% if p==paginated.page %}<span class="current">{{ p }}</span>{% else %}<a href="{{ url_for('admin.records', page=p, q=search) }}">{{ p }}</a>{% endif %}{% else %}<span style="padding:0 4px;color:var(--text-sub)">…</span>{% endif %}
             {% endfor %}
-
-            {% if paginated.has_next %}
-            <a href="{{ url_for('admin.records', page=paginated.next_num, q=search) }}">Next ›</a>
-            {% else %}<span class="disabled">Next ›</span>{% endif %}
+            {% if paginated.has_next %}<a href="{{ url_for('admin.records', page=paginated.next_num, q=search) }}">Next ›</a>{% else %}<span class="disabled">Next ›</span>{% endif %}
         </div>
         {% endif %}
 
         {% else %}
-        <div class="empty-state">
-            {% if search %}No records match "{{ search }}".{% else %}No records yet.{% endif %}
-        </div>
+        <div class="empty-state">{% if search %}No records match "{{ search }}".{% else %}No records yet.{% endif %}</div>
         {% endif %}
     </div>
 </div>
 
 <script>
-document.addEventListener('click', function(e){
-    var btn = e.target.closest('form[data-confirm] button[type="submit"]');
-    if(btn && !confirm(btn.closest('form').dataset.confirm)) e.preventDefault();
+(function(){
+    var STORAGE_KEY='autotos-theme';
+    var html=document.documentElement;
+    var btn=document.getElementById('themeToggle');
+    var icon=document.getElementById('themeIcon');
+    var label=document.getElementById('themeLabel');
+    function applyTheme(t){
+        html.setAttribute('data-theme',t);
+        icon.textContent=t==='dark'?'☀️':'🌙';
+        label.textContent=t==='dark'?'Light':'Dark';
+        try{localStorage.setItem(STORAGE_KEY,t);}catch(e){}
+    }
+    var saved='light';
+    try{saved=localStorage.getItem(STORAGE_KEY)||'light';}catch(e){}
+    applyTheme(saved);
+    btn.addEventListener('click',function(){applyTheme(html.getAttribute('data-theme')==='dark'?'light':'dark');});
+})();
+
+document.addEventListener('click',function(e){
+    var btn=e.target.closest('form[data-confirm] button[type="submit"]');
+    if(btn&&!confirm(btn.closest('form').dataset.confirm))e.preventDefault();
 });
 </script>
 </body>

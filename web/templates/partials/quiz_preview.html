@@ -1,108 +1,285 @@
 {# templates/partials/quiz_preview.html #}
 <style>
+/* ══ Quiz Preview – Dark Mode aware ══
+   Inherits data-theme="dark" from <html> set by the anti-flash script.
+   All colours use CSS variables so they flip automatically.
+══════════════════════════════════════ */
+
+/* Light tokens (default) */
+:root {
+  --pv-bg:           #ffffff;
+  --pv-bg-page:      #f1f5f9;
+  --pv-bg-thead:     #f8fafc;
+  --pv-bg-tfoot:     #f8fafc;
+  --pv-bg-toolbar:   #f1f5f9;
+  --pv-bg-choice:    #f8fafc;
+  --pv-bg-correct:   #f0fdf4;
+  --pv-bg-answer:    #f0fdf4;
+  --pv-bg-selected:  #eff6ff;
+  --pv-bg-btn:       #ffffff;
+  --pv-bg-btn-close: #f1f5f9;
+
+  --pv-text:         #0f172a;
+  --pv-text-sub:     #64748b;
+  --pv-text-muted:   #94a3b8;
+  --pv-text-correct: #14532d;
+  --pv-text-close:   #64748b;
+  --pv-text-title:   #111f33;
+
+  --pv-border:       #e2e8f0;
+  --pv-border-btn:   #e2e8f0;
+  --pv-border-close: #e2e8f0;
+
+  --pv-blue:         #2563eb;
+  --pv-blue-light:   #dbeafe;
+  --pv-blue-hover:   #1d4ed8;
+  --pv-blue-border:  #93c5fd;
+  --pv-amber:        #d97706;
+  --pv-amber-hover:  #b45309;
+  --pv-green:        #16a34a;
+  --pv-green-border: #86efac;
+
+  --pv-selected-shadow: inset 3px 0 0 #2563eb;
+}
+
+/* Dark tokens */
+[data-theme="dark"] {
+  --pv-bg:           #1e293b;
+  --pv-bg-page:      #0f172a;
+  --pv-bg-thead:     #162032;
+  --pv-bg-tfoot:     #162032;
+  --pv-bg-toolbar:   #0f172a;
+  --pv-bg-choice:    #162032;
+  --pv-bg-correct:   #052e16;
+  --pv-bg-answer:    #052e16;
+  --pv-bg-selected:  #1e3a5f;
+  --pv-bg-btn:       #1e293b;
+  --pv-bg-btn-close: #0f172a;
+
+  --pv-text:         #f1f5f9;
+  --pv-text-sub:     #94a3b8;
+  --pv-text-muted:   #475569;
+  --pv-text-correct: #86efac;
+  --pv-text-close:   #94a3b8;
+  --pv-text-title:   #e2e8f0;
+
+  --pv-border:       #334155;
+  --pv-border-btn:   #334155;
+  --pv-border-close: #334155;
+
+  --pv-blue:         #3b82f6;
+  --pv-blue-light:   #1e3a5f;
+  --pv-blue-hover:   #2563eb;
+  --pv-blue-border:  #3b82f6;
+  --pv-amber:        #f59e0b;
+  --pv-amber-hover:  #d97706;
+  --pv-green:        #22c55e;
+  --pv-green-border: #22c55e;
+
+  --pv-selected-shadow: inset 3px 0 0 #3b82f6;
+}
+
 #quiz-preview-card {
   box-sizing: border-box;
   font-family: 'DM Sans', system-ui, sans-serif;
-  color: #0f172a;
+  color: var(--pv-text);
+  background: var(--pv-bg);
+  transition: background 0.25s, color 0.25s;
 }
+
+/* ── Header ── */
 #quiz-preview-card .pv-header {
-  text-align: center; margin-bottom: 18px;
-  padding-bottom: 16px; border-bottom: 1px solid #e2e8f0;
+  text-align: center;
+  margin-bottom: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--pv-border);
 }
 #quiz-preview-card .pv-header h2 {
   font-family: 'DM Serif Display', serif;
-  font-size: 22px; font-weight: 400; color: #111f33; margin-bottom: 6px;
+  font-size: 22px; font-weight: 400;
+  color: var(--pv-text-title);
+  margin-bottom: 6px;
 }
-#quiz-preview-card .pv-meta { font-size: 13px; color: #64748b; }
+#quiz-preview-card .pv-meta { font-size: 13px; color: var(--pv-text-sub); }
 
+/* ── Section label ── */
 .pv-section-label {
   font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.5px; color: #64748b; margin-bottom: 10px;
+  letter-spacing: 0.5px; color: var(--pv-text-sub);
+  margin-bottom: 10px;
   display: flex; align-items: center; gap: 8px;
 }
-.pv-section-label::after { content:''; flex:1; height:1px; background:#e2e8f0; }  
+.pv-section-label::after { content:''; flex:1; height:1px; background: var(--pv-border); }
 
+/* ── Test section headers ── */
 .pv-test-header {
   font-family: 'DM Serif Display', serif;
-  font-size: 18px; color: #2563eb;
+  font-size: 18px; color: var(--pv-blue);
   margin-top: 28px; margin-bottom: 4px;
-  border-bottom: 2px solid #e2e8f0; padding-bottom: 6px;
+  border-bottom: 2px solid var(--pv-border);
+  padding-bottom: 6px;
 }
-.pv-test-desc { font-size: 13px; color: #64748b; font-style: italic; margin-bottom: 16px; }
+.pv-test-desc {
+  font-size: 13px; color: var(--pv-text-sub);
+  font-style: italic; margin-bottom: 16px;
+}
 
-.spec-table { width:100%; border-collapse:collapse; margin:12px 0 24px; font-size:13px; }
+/* ── Spec table ── */
+.spec-table {
+  width: 100%; border-collapse: collapse;
+  margin: 12px 0 24px; font-size: 13px;
+}
 .spec-table th, .spec-table td {
-  border:1px solid #e2e8f0; padding:8px 10px; text-align:left; vertical-align:middle;
+  border: 1px solid var(--pv-border);
+  padding: 8px 10px;
+  text-align: left; vertical-align: middle;
+  color: var(--pv-text);
 }
-.spec-table thead th { background:#f8fafc; font-weight:700; font-size:12px; }
-.spec-table .small  { font-size:12px; color:#64748b; }
-.spec-table .center { text-align:center; }
-.spec-table .right  { text-align:right; }
+.spec-table thead th {
+  background: var(--pv-bg-thead);
+  font-weight: 700; font-size: 12px;
+  color: var(--pv-text-sub);
+}
+.spec-table tfoot tr td {
+  background: var(--pv-bg-tfoot);
+  font-weight: 700;
+  color: var(--pv-text);
+}
+.spec-table .small  { font-size: 12px; color: var(--pv-text-sub); }
+.spec-table .center { text-align: center; }
+.spec-table .right  { text-align: right; }
+.spec-table tbody tr:hover td { background: var(--pv-bg-thead); }
 
+/* ── Toolbar ── */
 .pv-toolbar {
-  display:flex; align-items:center; gap:8px;
-  margin:16px 0 10px; padding:8px 12px;
-  background:#f1f5f9; border:1px solid #e2e8f0; border-radius:8px; font-size:13px;
+  display: flex; align-items: center; gap: 8px;
+  margin: 16px 0 10px; padding: 8px 12px;
+  background: var(--pv-bg-toolbar);
+  border: 1px solid var(--pv-border);
+  border-radius: 8px; font-size: 13px;
+  transition: background 0.25s;
 }
 .pv-toolbar button {
-  background:#fff; border:1.5px solid #e2e8f0; border-radius:7px;
-  padding:5px 12px; cursor:pointer;
-  font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600; color:#1a2e4a;
-  transition:background 0.15s, border-color 0.15s;
+  background: var(--pv-bg-btn);
+  border: 1.5px solid var(--pv-border-btn);
+  border-radius: 7px;
+  padding: 5px 12px; cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px; font-weight: 600;
+  color: var(--pv-text);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.pv-toolbar button:hover { background:#dbeafe; border-color:#93c5fd; color:#2563eb; }
-#preview-selected-count { margin-left:auto; color:#2563eb; font-weight:700; font-size:13px; }
+.pv-toolbar button:hover {
+  background: var(--pv-blue-light);
+  border-color: var(--pv-blue-border);
+  color: var(--pv-blue);
+}
+#preview-selected-count {
+  margin-left: auto;
+  color: var(--pv-blue);
+  font-weight: 700; font-size: 13px;
+}
 
-#quiz-preview-card ol.questions { margin:0; padding-left:20px; }
+/* ── Questions list ── */
+#quiz-preview-card ol.questions { margin: 0; padding-left: 20px; }
 #quiz-preview-card ol.questions > li {
-  margin-bottom:22px; line-height:1.5; border-radius:7px;
-  transition:background 0.12s, box-shadow 0.12s;
+  margin-bottom: 22px; line-height: 1.5;
+  border-radius: 7px;
+  transition: background 0.12s, box-shadow 0.12s;
 }
 #quiz-preview-card ol.questions > li.q-selected {
-  background:#eff6ff; box-shadow:inset 3px 0 0 #2563eb; padding-left:10px;
+  background: var(--pv-bg-selected);
+  box-shadow: var(--pv-selected-shadow);
+  padding-left: 10px;
 }
-.question-item-wrapper { display:flex; align-items:flex-start; gap:10px; }
-.question-select-cb {
-  margin-top:3px; flex-shrink:0;
-  width:16px; height:16px; cursor:pointer; accent-color:#2563eb;
-}
-.question-item-body { flex:1; min-width:0; }
-.q-meta {
-  font-size:10px; font-weight:700; text-transform:uppercase;
-  letter-spacing:0.4px; color:#94a3b8; margin-bottom:5px;
-}
-.q-text { font-size:14px; color:#0f172a; margin-bottom:10px; font-weight:500; }
-.choices { list-style:none; padding:0; margin:0 0 10px; display:flex; flex-direction:column; gap:5px; }
-.choices li { padding:7px 12px; border-radius:7px; background:#f8fafc; border:1px solid #e2e8f0; font-size:13px; }
-.choices li.correct { background:#f0fdf4; border-color:#86efac; color:#14532d; font-weight:600; }
-.tf-note { font-size:13px; color:#64748b; font-style:italic; margin-bottom:10px; }
-.answer-block {
-  font-size:13px; color:#0f172a;
-  background:#f0fdf4; padding:10px 14px;
-  border-left:3px solid #16a34a; border-radius:6px;
-}
-.answer-block .answer-text { font-size:12px; color:#64748b; margin-top:4px; }
 
+.question-item-wrapper { display: flex; align-items: flex-start; gap: 10px; }
+.question-select-cb {
+  margin-top: 3px; flex-shrink: 0;
+  width: 16px; height: 16px; cursor: pointer;
+  accent-color: var(--pv-blue);
+}
+.question-item-body { flex: 1; min-width: 0; }
+
+.q-meta {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.4px; color: var(--pv-text-muted);
+  margin-bottom: 5px;
+}
+.q-text { font-size: 14px; color: var(--pv-text); margin-bottom: 10px; font-weight: 500; }
+
+/* ── Choices ── */
+.choices {
+  list-style: none; padding: 0; margin: 0 0 10px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.choices li {
+  padding: 7px 12px; border-radius: 7px;
+  background: var(--pv-bg-choice);
+  border: 1px solid var(--pv-border);
+  font-size: 13px; color: var(--pv-text);
+}
+.choices li.correct {
+  background: var(--pv-bg-correct);
+  border-color: var(--pv-green-border);
+  color: var(--pv-text-correct);
+  font-weight: 600;
+}
+.tf-note { font-size: 13px; color: var(--pv-text-sub); font-style: italic; margin-bottom: 10px; }
+
+/* ── Answer block ── */
+.answer-block {
+  font-size: 13px; color: var(--pv-text);
+  background: var(--pv-bg-answer);
+  padding: 10px 14px;
+  border-left: 3px solid var(--pv-green);
+  border-radius: 6px;
+}
+.answer-block .answer-text { font-size: 12px; color: var(--pv-text-sub); margin-top: 4px; }
+
+/* ── Bottom action buttons ── */
 .pv-actions {
-  display:flex; gap:10px; justify-content:center;
-  margin-top:28px; padding-top:20px; border-top:1px solid #e2e8f0; flex-wrap:wrap;
+  display: flex; gap: 10px; justify-content: center;
+  margin-top: 28px; padding-top: 20px;
+  border-top: 1px solid var(--pv-border);
+  flex-wrap: wrap;
 }
 .pv-actions button {
-  padding:10px 22px; border-radius:8px;
-  font-family:'DM Sans',sans-serif; font-size:13px; font-weight:600;
-  cursor:pointer; transition:background 0.15s; border:none;
+  padding: 10px 22px; border-radius: 8px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, color 0.15s;
+  border: none;
 }
-#quiz-preview-save          { background:#2563eb; color:#fff; }
-#quiz-preview-save:hover    { background:#1d4ed8; }
-#quiz-preview-save-selected { background:#d97706; color:#fff; }
-#quiz-preview-save-selected:hover    { background:#b45309; }
-#quiz-preview-save-selected:disabled {
-  background:#e2e8f0 !important; color:#94a3b8 !important; cursor:not-allowed !important;
-}
-#quiz-preview-close       { background:#f1f5f9; color:#64748b; border:1.5px solid #e2e8f0 !important; }
-#quiz-preview-close:hover { background:#e2e8f0; }
 
-@media (max-width:900px) { .spec-table th,.spec-table td { font-size:11px; padding:5px; } }
+#quiz-preview-save       { background: var(--pv-blue); color: #fff; }
+#quiz-preview-save:hover { background: var(--pv-blue-hover); }
+
+#quiz-preview-save-selected       { background: var(--pv-amber); color: #fff; }
+#quiz-preview-save-selected:hover { background: var(--pv-amber-hover); }
+#quiz-preview-save-selected:disabled {
+  background: var(--pv-border) !important;
+  color: var(--pv-text-muted) !important;
+  cursor: not-allowed !important;
+}
+
+#quiz-preview-close {
+  background: var(--pv-bg-btn-close);
+  color: var(--pv-text-close);
+  border: 1.5px solid var(--pv-border-close) !important;
+}
+#quiz-preview-close:hover { background: var(--pv-border); }
+
+/* ── FAM/INT/CRE sub-text ── */
+.pv-spec-meta {
+  font-size: 12px;
+  color: var(--pv-text-sub);
+  margin-bottom: 8px;
+}
+
+@media (max-width: 900px) {
+  .spec-table th, .spec-table td { font-size: 11px; padding: 5px; }
+}
 </style>
 
 <div id="quiz-preview-card" role="region" aria-label="Quiz preview">
@@ -123,7 +300,7 @@
   {% set cre_pct = cre_pct if cre_pct is not none else 20 %}
 
   <div class="pv-section-label">Table of Specification</div>
-  <div style="font-size:12px; color:#64748b; margin-bottom:8px;">
+  <div class="pv-spec-meta">
     FAM {{ fam_pct }}% &nbsp;/&nbsp; INT {{ int_pct }}% &nbsp;/&nbsp; CRE {{ cre_pct }}%
   </div>
 
@@ -149,17 +326,17 @@
     <tbody>
       {% set totals = namespace(hrs=0, fam=0, intg=0, cre=0, total_items=0) %}
       {% for t in topics %}
-        {% set totals.hrs        = totals.hrs        + (t.hours or 0) %}
-        {% set totals.fam        = totals.fam        + (t.fam   or 0) %}
-        {% set totals.intg       = totals.intg       + (t.int   or 0) %}
-        {% set totals.cre        = totals.cre        + (t.cre   or 0) %}
+        {% set totals.hrs         = totals.hrs         + (t.hours or 0) %}
+        {% set totals.fam         = totals.fam         + (t.fam   or 0) %}
+        {% set totals.intg        = totals.intg        + (t.int   or 0) %}
+        {% set totals.cre         = totals.cre         + (t.cre   or 0) %}
         {% set totals.total_items = totals.total_items + (t['items'] or t['quiz_items'] or 0) %}
         <tr>
           <td>
             <strong>{{ t.topic }}</strong>
             {% if t.learn_material %}
-              <div style="font-size:11px; color:#777; font-style:italic; margin-top:3px;">
-                Material: {{ t.learn_material[:100] }}{% if t.learn_material|length > 100 %}...{% endif %}
+              <div style="font-size:11px; color:var(--pv-text-muted); font-style:italic; margin-top:3px;">
+                Material: {{ t.learn_material[:100] }}{% if t.learn_material|length > 100 %}…{% endif %}
               </div>
             {% endif %}
           </td>
@@ -175,7 +352,7 @@
       {% endfor %}
     </tbody>
     <tfoot>
-      <tr style="font-weight:700; background:#f8fafc;">
+      <tr>
         <td class="right">TOTAL</td>
         <td class="center">{{ totals.hrs }}</td>
         <td class="center">{{ totals.fam }}</td><td class="center small"></td>

@@ -21,34 +21,61 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── AI Model Service (FastAPI + ai_model.py) ────────────────────────────────
+  # ── Ollama — LLM runtime ────────────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama
+    container_name: autotoss_ollama
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./models:/models
+    ports:
+      - "11434:11434"
+    environment:
+      # Allow Ollama to process multiple requests at once.
+      # Keep this equal to GENERATION_WORKERS in the ai service below.
+      # If your machine has a GPU, raise both to 6; CPU-only keep at 4.
+      - OLLAMA_NUM_PARALLEL=2
+      # Keeps the model loaded between requests instead of unloading after
+      # each one (default is 5 m). -1 = never unload while the container runs.
+      - OLLAMA_KEEP_ALIVE=-1
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── AI FastAPI service ──────────────────────────────────────────────────────
   ai:
-    build:  
-      context: .           # ← root folder so Docker can see ai_packages/
+    build:
+      context: .
       dockerfile: ai/Dockerfile
     container_name: autotoss_ai
     restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      - ./models:/app/models      # mount model weight files here
       - ./uploads:/app/uploads
     environment:
-      - MODEL_PATH=${MODEL_PATH}
-    # ── Uncomment if your server PC has an NVIDIA GPU ──
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: 1
-    #           capabilities: [gpu]
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-autotos}
+      - OLLAMA_TIMEOUT=300
+      # Must equal OLLAMA_NUM_PARALLEL above.
+      # Each worker sends one request to Ollama concurrently.
+      - GENERATION_WORKERS=2
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+    # --- CHANGE ONLY THIS BLOCK ---
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 20s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 5s
       retries: 5
-      start_period: 60s      # model loading can take a while
+      start_period: 15s
+    # ------------------------------
 
   # ── Flask Web Application ───────────────────────────────────────────────────
   web:
@@ -75,4 +102,5 @@ services:
         condition: service_healthy
 
 volumes:
-  db_data:     # MySQL data persists across restarts and rebuilds
+  db_data:
+  ollama_data:
