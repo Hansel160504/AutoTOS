@@ -19,7 +19,7 @@ header nav{display:flex;align-items:center;gap:2px;}header nav a{padding:6px 14p
 .view-stage{position:fixed;inset:0;top:60px;background:var(--bg-stage);backdrop-filter:blur(2px);display:flex;justify-content:center;align-items:flex-start;padding:24px 16px;overflow-y:auto;z-index:100;}
 .bondpaper{width:min(var(--bondpaper-w),calc(100% - 32px));background:var(--bg-card);border-radius:12px;box-shadow:var(--shadow-lg);border:1px solid var(--border-col);box-sizing:border-box;position:relative;margin:0 auto 24px;max-height:calc(100vh - 60px - 80px);overflow-y:auto;animation:popIn 0.22s ease both;transition:background 0.25s;}.bondpaper.is-derived{border-top:3px solid var(--amber);}
 @keyframes popIn{from{opacity:0;transform:scale(0.97)}to{opacity:1;transform:scale(1)}}
-.preview-tools{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border-col);position:sticky;top:0;background:var(--bg-card);z-index:10;gap:12px;flex-wrap:wrap;transition:background 0.25s;}.preview-tools .left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;}.preview-tools .left .doc-title{font-family:'DM Serif Display',serif;font-size:16px;color:var(--navy-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px;}.preview-tools .right{display:flex;gap:8px;align-items:center;flex-shrink:0;}
+.preview-tools{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid var(--border-col);position:sticky;top:0;background:var(--bg-card);z-index:10;gap:12px;flex-wrap:wrap;transition:background 0.25s;}.preview-tools .left{display:flex;align-items:center;gap:10px;min-width:0;flex:1;}.preview-tools .left .doc-title{font-family:'DM Serif Display',serif;font-size:16px;color:var(--navy-deep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:360px;}.preview-tools .right{display:flex;gap:8px;align-items:center;flex-shrink:0;flex-wrap:wrap;}
 .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:none;text-decoration:none;white-space:nowrap;transition:background 0.15s,transform 0.1s;}.btn:active{transform:translateY(1px);}.btn.secondary{background:var(--bg-card);color:var(--navy-deep);border:1.5px solid var(--border-col);}.btn.secondary:hover{filter:brightness(0.92);}.btn.primary{background:var(--blue);color:white;box-shadow:0 1px 4px rgba(37,99,235,0.25);}.btn.primary:hover{background:#1d4ed8;}.btn.danger{background:var(--red-light);color:var(--red);border:1.5px solid var(--red);}.btn.danger:hover{filter:brightness(0.92);}
 .badge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;padding:3px 9px;border-radius:20px;white-space:nowrap;flex-shrink:0;}.badge.master{background:var(--blue-light);color:var(--blue);border:1px solid var(--blue);}.badge.derived{background:var(--amber-light);color:var(--amber);border:1px solid var(--amber-border);}
 .preview-body{padding:28px 32px 36px;}
@@ -48,7 +48,33 @@ header nav{display:flex;align-items:center;gap:2px;}header nav a{padding:6px 14p
 .spec-table tbody td{text-align:center;font-size:12px;}.spec-table tbody td:first-child{text-align:left;font-weight:600;padding-left:10px;}.spec-table tbody tr:hover td{background:rgba(0,0,0,0.02);}
 .spec-table tfoot tr td{font-weight:700;font-size:12px;background:var(--bg-thead);text-align:center;border-top:2px solid var(--border-col);}.spec-table tfoot tr td:first-child{text-align:right;padding-right:14px;}
 
-.test-section-header{font-family:'DM Serif Display',serif;font-size:18px;color:var(--blue);margin-top:28px;margin-bottom:4px;border-bottom:2px solid var(--border-col);padding-bottom:6px;}.test-section-desc{font-size:13px;color:var(--text-sub);font-style:italic;margin-bottom:16px;}
+/* ══ Test section header — leveled (name + instruction on same line) ══ */
+.test-section-wrap{
+  display:flex;
+  align-items:baseline;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-top:28px;
+  margin-bottom:14px;
+  border-bottom:2px solid var(--border-col);
+  padding-bottom:6px;
+}
+.test-section-header{
+  font-family:'DM Serif Display',serif;
+  font-size:18px;
+  color:var(--blue);
+  margin:0;
+  flex-shrink:0;
+  line-height:1.2;
+}
+.test-section-desc{
+  font-size:13px;
+  color:var(--text-sub);
+  font-style:italic;
+  margin:0;
+  line-height:1.4;
+}
+
 ol.questions{margin:0;padding-left:20px;}ol.questions>li{margin-bottom:24px;line-height:1.5;page-break-inside:avoid;}
 .q-meta{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-muted);margin-bottom:5px;}.q-text{font-size:14px;color:var(--text-main);margin-bottom:10px;font-weight:500;}
 .choices{list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:5px;}.choices li{padding:7px 12px;border-radius:7px;background:var(--bg-choice);border:1px solid var(--border-col);font-size:13px;color:var(--text-main);}.choices li.correct{background:var(--green-light);border-color:var(--green);color:var(--green);font-weight:600;}
@@ -65,7 +91,7 @@ ol.questions{margin:0;padding-left:20px;}ol.questions>li{margin-bottom:24px;line
   .cilo-block-body{background:#f5f5f5!important;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
   ol.questions>li{break-inside:avoid}a[href]::after{content:''!important}
 }
-@media(max-width:700px){.view-stage{padding:16px 10px}.preview-body{padding:20px 18px}.preview-tools{padding:12px 16px}.theme-toggle-label{display:none}}
+@media(max-width:700px){.view-stage{padding:16px 10px}.preview-body{padding:20px 18px}.preview-tools{padding:12px 16px}.theme-toggle-label{display:none}.test-section-wrap{flex-direction:column;gap:4px;}.test-section-header{font-size:16px;}}
 </style>
 </head>
 <body>
@@ -97,6 +123,10 @@ ol.questions{margin:0;padding-left:20px;}ol.questions>li{margin-bottom:24px;line
       </div>
       <div class="right">
         <a href="{{ url_for('dashboard.index') }}" class="btn secondary">Close</a>
+        <a href="{{ url_for('dashboard.download_docx', id=record.id) }}"
+           class="btn secondary"
+           target="_blank"
+           title="Download as Word document (long bond paper, Arial, B&W)">⬇ DOCX</a>
         <button class="btn primary" onclick="window.print()">🖨 Print</button>
         <a href="{{ url_for('dashboard.delete_tos', id=record.id) }}" class="btn danger"
            onclick="return confirm('Delete this record permanently?');">🗑 Delete</a>
@@ -211,14 +241,19 @@ ol.questions{margin:0;padding-left:20px;}ol.questions>li{margin-bottom:24px;line
       <ol class="questions">
         {% set ns = namespace(cur_test='') %}
         {% for q in quizzes %}
+
+          {# Test section header: name and instruction leveled on the same line #}
           {% set hdr = q.test_header or '' %}
           {% if hdr and hdr != ns.cur_test %}
-            <div style="margin-top:32px;margin-bottom:16px;">
+            <div class="test-section-wrap">
               <h3 class="test-section-header">{{ hdr }}</h3>
-              {% if q.test_description %}<p class="test-section-desc">{{ q.test_description }}</p>{% endif %}
+              {% if q.test_description %}
+                <span class="test-section-desc">{{ q.test_description }}</span>
+              {% endif %}
             </div>
             {% set ns.cur_test = hdr %}
           {% endif %}
+
           <li>
             <div class="q-meta">Q{{ loop.index }} &nbsp;·&nbsp; {{ (q.type or '')|upper }} &nbsp;·&nbsp; {{ q.bloom or '—' }} &nbsp;·&nbsp; {{ q.concept or '—' }}</div>
             <div class="q-text">{{ q.question or '' }}</div>
@@ -248,6 +283,10 @@ ol.questions{margin:0;padding-left:20px;}ol.questions>li{margin-bottom:24px;line
 
       <div class="pv-actions">
         <a href="{{ url_for('dashboard.index') }}" class="btn secondary">Close</a>
+        <a href="{{ url_for('dashboard.download_docx', id=record.id) }}"
+           class="btn secondary"
+           target="_blank"
+           title="Download as Word document (long bond paper, Arial, B&W)">⬇ Download DOCX</a>
         <button class="btn primary" onclick="window.print()">🖨 Print</button>
       </div>
     </div>

@@ -7,3 +7,4 @@ gunicorn
 requests
 werkzeug
 python-dotenv
+python-docx

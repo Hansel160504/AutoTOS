@@ -2,7 +2,7 @@
 # CILOs are stored inside topics_json as:
 #   {"_cilos": ["...", "..."], "topics": [...]}
 # Old records (plain list) are handled transparently.
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, current_app
+from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, current_app, send_file
 from flask_login import login_required, current_user
 from extensions import db
 from models import TosRecord
@@ -20,6 +20,7 @@ import requests
 import time
 import importlib
 from functools import wraps
+from io import BytesIO
 
 def faculty_required(f):
     @wraps(f)
@@ -288,6 +289,306 @@ def recompute_topics_for_derived(topics_json_str: str, quizzes: list) -> list:
             else:
                 t[f"{key}_range"] = ""
     return topics
+
+
+# ============================================================
+# DOCX BUILDER
+# ============================================================
+def _build_docx(title, cilos, topics, quizzes, fam_pct, int_pct, cre_pct, total_items):
+    """
+    Build a long bond paper (8.5×13"), Arial, black-and-white DOCX.
+    Contains: CILOs (if any) → TOS table → Exam items.
+    Excludes the title header and subject-type label.
+    """
+    from docx import Document
+    from docx.shared import Pt, Inches, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.table import WD_ALIGN_VERTICAL
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    doc = Document()
+
+    # ── Page: long bond paper 8.5 × 13 in ──────────────────
+    sec = doc.sections[0]
+    sec.page_width    = Inches(8.5)
+    sec.page_height   = Inches(13)
+    sec.top_margin    = Inches(1)
+    sec.bottom_margin = Inches(1)
+    sec.left_margin   = Inches(1)
+    sec.right_margin  = Inches(1)
+
+    # ── Default style: Arial 11pt black ─────────────────────
+    normal      = doc.styles['Normal']
+    normal.font.name      = 'Arial'
+    normal.font.size      = Pt(11)
+    normal.font.color.rgb = RGBColor(0, 0, 0)
+
+    # ── Internal helpers ────────────────────────────────────
+    def _run(para, text, bold=False, size=11, italic=False):
+        r = para.add_run(text or '')
+        r.font.name       = 'Arial'
+        r.font.size       = Pt(size)
+        r.font.bold       = bold
+        r.font.italic     = italic
+        r.font.color.rgb  = RGBColor(0, 0, 0)
+        return r
+
+    def add_para(text='', bold=False, size=11,
+                 align=WD_ALIGN_PARAGRAPH.LEFT, italic=False,
+                 space_before=0, space_after=4):
+        p = doc.add_paragraph()
+        p.alignment = align
+        p.paragraph_format.space_before = Pt(space_before)
+        p.paragraph_format.space_after  = Pt(space_after)
+        if text:
+            _run(p, text, bold=bold, size=size, italic=italic)
+        return p
+
+    def cell_write(cell, text, bold=False, size=9,
+                   align=WD_ALIGN_PARAGRAPH.CENTER, italic=False,
+                   valign=WD_ALIGN_VERTICAL.CENTER):
+        """Write multi-line text into a table cell (splits on \\n)."""
+        cell.vertical_alignment = valign
+        lines = (text or '').split('\n')
+
+        # First paragraph (already exists in every new cell)
+        p0 = cell.paragraphs[0]
+        p0.alignment = align
+        p0.paragraph_format.space_before = Pt(1)
+        p0.paragraph_format.space_after  = Pt(1)
+        p0.paragraph_format.left_indent  = Inches(0.05)
+        p0.paragraph_format.right_indent = Inches(0.05)
+        _run(p0, lines[0], bold=bold, size=size, italic=italic)
+
+        for line in lines[1:]:
+            p2 = cell.add_paragraph()
+            p2.alignment = align
+            p2.paragraph_format.space_before = Pt(0)
+            p2.paragraph_format.space_after  = Pt(1)
+            p2.paragraph_format.left_indent  = Inches(0.05)
+            p2.paragraph_format.right_indent = Inches(0.05)
+            _run(p2, line, bold=bold, size=size, italic=italic)
+
+    def shade_cell(cell, hex_color='E0E0E0'):
+        tc   = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        shd  = OxmlElement('w:shd')
+        shd.set(qn('w:val'),   'clear')
+        shd.set(qn('w:color'), 'auto')
+        shd.set(qn('w:fill'),  hex_color)
+        tcPr.append(shd)
+
+    def set_cell_width(cell, twips):
+        tc   = cell._tc
+        tcPr = tc.get_or_add_tcPr()
+        tcW  = OxmlElement('w:tcW')
+        tcW.set(qn('w:w'),    str(twips))
+        tcW.set(qn('w:type'), 'dxa')
+        tcPr.append(tcW)
+
+    def set_table_width(table, twips):
+        tblPr = table._tbl.tblPr
+        tblW  = OxmlElement('w:tblW')
+        tblW.set(qn('w:w'),    str(twips))
+        tblW.set(qn('w:type'), 'dxa')
+        tblPr.append(tblW)
+
+    # ── Column widths (total = 6.5" = 9360 twips) ───────────
+    # 1 inch = 1440 twips
+    COL_W = [
+        int(2.0  * 1440),   # Content Outline  — 2880
+        int(0.65 * 1440),   # Hours            — 936
+        int(1.1  * 1440),   # FAM              — 1584
+        int(1.1  * 1440),   # INT              — 1584
+        int(1.1  * 1440),   # CRE              — 1584
+        int(0.55 * 1440),   # Total            — 792
+    ]  # sum = 9360 ✓
+
+    # ────────────────────────────────────────────────────────
+    # 1. CILOs
+    # ────────────────────────────────────────────────────────
+    if cilos:
+        add_para(
+            'Cognitive Objectives / Behavioral Dimensions / Thinking Skills',
+            bold=True, size=10, align=WD_ALIGN_PARAGRAPH.CENTER,
+            space_before=0, space_after=2
+        )
+        add_para('Intended Learning Outcomes (CILO):', bold=True, size=10,
+                 space_before=2, space_after=3)
+        for i, c in enumerate(cilos, 1):
+            p = doc.add_paragraph()
+            p.paragraph_format.left_indent  = Inches(0.25)
+            p.paragraph_format.space_before = Pt(0)
+            p.paragraph_format.space_after  = Pt(2)
+            _run(p, f'{i}.  {c}', size=10)
+        add_para(space_after=8)
+
+    # ────────────────────────────────────────────────────────
+    # 2. TOS Table
+    # ────────────────────────────────────────────────────────
+    add_para('TABLE OF SPECIFICATION', bold=True, size=11,
+             align=WD_ALIGN_PARAGRAPH.CENTER, space_before=4, space_after=6)
+
+    n_data = len(topics)
+    tbl = doc.add_table(rows=3 + n_data + 1, cols=6)
+    tbl.style = 'Table Grid'
+    set_table_width(tbl, sum(COL_W))
+
+    # Set all cell widths before merging
+    for row in tbl.rows:
+        for ci, cell in enumerate(row.cells):
+            set_cell_width(cell, COL_W[ci])
+
+    # Vertical merge: Content Outline & Hours span all 3 header rows
+    tbl.cell(0, 0).merge(tbl.cell(2, 0))
+    tbl.cell(0, 1).merge(tbl.cell(2, 1))
+
+    # ── Header row 0 ──
+    cell_write(tbl.cell(0, 0), 'CONTENT OUTLINE',
+               bold=True, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
+    cell_write(tbl.cell(0, 1), 'NUMBER OF\nHOURS SPENT', bold=True, size=9)
+    cell_write(tbl.cell(0, 2),
+               'FAMILIARIZATION\n(Remembering / Understanding)', bold=True, size=9)
+    cell_write(tbl.cell(0, 3),
+               'INTEGRATION\n(Applying / Analyzing)', bold=True, size=9)
+    cell_write(tbl.cell(0, 4),
+               'CREATION\n(Evaluating / Creating)', bold=True, size=9)
+    cell_write(tbl.cell(0, 5), 'TOTAL', bold=True, size=9)
+    for ci in range(6):
+        shade_cell(tbl.cell(0, ci), 'D0D0D0')
+
+    # ── Header row 1 – percentages (cols 0,1 are shadow cells) ──
+    cell_write(tbl.cell(1, 2), f'(Percentage)\n{fam_pct}%', size=9, italic=True)
+    cell_write(tbl.cell(1, 3), f'(Percentage)\n{int_pct}%', size=9, italic=True)
+    cell_write(tbl.cell(1, 4), f'(Percentage)\n{cre_pct}%', size=9, italic=True)
+    cell_write(tbl.cell(1, 5), '100%', size=9, italic=True)
+    for ci in range(2, 6):
+        shade_cell(tbl.cell(1, ci), 'EBEBEB')
+
+    # ── Header row 2 – "Item Numbers" ──
+    cell_write(tbl.cell(2, 2), 'Item Numbers', bold=True, size=9)
+    cell_write(tbl.cell(2, 3), 'Item Numbers', bold=True, size=9)
+    cell_write(tbl.cell(2, 4), 'Item Numbers', bold=True, size=9)
+    cell_write(tbl.cell(2, 5), 'Total No.\nof Items', bold=True, size=9)
+    for ci in range(2, 6):
+        shade_cell(tbl.cell(2, ci), 'EBEBEB')
+
+    # ── Data rows ──
+    t_hrs = t_fam = t_int = t_cre = t_tot = 0
+    for i, t in enumerate(topics):
+        row  = tbl.rows[3 + i]
+        hrs  = t.get('hours') or 0
+        fam  = t.get('fam')   or 0
+        intg = t.get('int')   or 0
+        cre  = t.get('cre')   or 0
+        tot  = t.get('items') or t.get('quiz_items') or 0
+        t_hrs += hrs; t_fam += fam; t_int += intg
+        t_cre += cre; t_tot += tot
+
+        cell_write(row.cells[0], t.get('topic') or '', bold=True, size=10,
+                   align=WD_ALIGN_PARAGRAPH.LEFT)
+        cell_write(row.cells[1], str(hrs),  size=10)
+        cell_write(row.cells[2], t.get('fam_range') or '', size=10)
+        cell_write(row.cells[3], t.get('int_range') or '', size=10)
+        cell_write(row.cells[4], t.get('cre_range') or '', size=10)
+        cell_write(row.cells[5], str(tot),  bold=True, size=10)
+
+    # ── Footer (totals) row ──
+    fr = tbl.rows[3 + n_data]
+    cell_write(fr.cells[0], 'TOTAL:', bold=True, size=10,
+               align=WD_ALIGN_PARAGRAPH.RIGHT)
+    cell_write(fr.cells[1], str(t_hrs), bold=True, size=10)
+    cell_write(fr.cells[2], str(t_fam), bold=True, size=10)
+    cell_write(fr.cells[3], str(t_int), bold=True, size=10)
+    cell_write(fr.cells[4], str(t_cre), bold=True, size=10)
+    cell_write(fr.cells[5], str(t_tot), bold=True, size=10)
+    for ci in range(6):
+        shade_cell(fr.cells[ci], 'D0D0D0')
+
+    add_para(space_after=14)
+
+    # ────────────────────────────────────────────────────────
+    # 3. Exam Items
+    # ────────────────────────────────────────────────────────
+    add_para('EXAM ITEMS', bold=True, size=12,
+             align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=8)
+
+    cur_test = ''
+    for idx, q in enumerate(quizzes, 1):
+        if not isinstance(q, dict):
+            continue
+
+        # Test section header (leveled: name — description on same line)
+        hdr  = q.get('test_header')      or ''
+        desc = q.get('test_description') or ''
+        if hdr and hdr != cur_test:
+            cur_test = hdr
+            p_hdr = doc.add_paragraph()
+            p_hdr.paragraph_format.space_before = Pt(10)
+            p_hdr.paragraph_format.space_after  = Pt(4)
+            p_hdr.paragraph_format.keep_with_next = True
+            _run(p_hdr, hdr, bold=True, size=12)
+            if desc:
+                _run(p_hdr, f'   —   {desc}', bold=False, size=11, italic=True)
+            # Underline via paragraph border
+            pPr = p_hdr._p.get_or_add_pPr()
+            pBdr = OxmlElement('w:pBdr')
+            bottom = OxmlElement('w:bottom')
+            bottom.set(qn('w:val'),   'single')
+            bottom.set(qn('w:sz'),    '6')
+            bottom.set(qn('w:space'), '1')
+            bottom.set(qn('w:color'), '000000')
+            pBdr.append(bottom)
+            pPr.append(pBdr)
+
+        qtype = (q.get('type') or '').lower()
+
+        # Question text
+        p_q = doc.add_paragraph()
+        p_q.paragraph_format.space_before   = Pt(4)
+        p_q.paragraph_format.space_after    = Pt(2)
+        p_q.paragraph_format.keep_with_next = True
+        _run(p_q, f'{idx}.  {q.get("question") or ""}', size=11)
+
+        # MCQ choices
+        if qtype == 'mcq' and q.get('choices'):
+            letters = ['a', 'b', 'c', 'd', 'e']
+            ans_l   = (q.get('answer') or '').lower()
+            for ci, choice in enumerate(q['choices'][:5]):
+                letter   = letters[ci]
+                choice_l = (choice or '').lower()
+                is_cor   = ((choice_l == ans_l) or
+                            (ans_l and ans_l in choice_l) or
+                            (ans_l == letter))
+                p_c = doc.add_paragraph()
+                p_c.paragraph_format.left_indent  = Inches(0.35)
+                p_c.paragraph_format.space_before = Pt(1)
+                p_c.paragraph_format.space_after  = Pt(1)
+                _run(p_c, f'{letter})  {choice or ""}', bold=is_cor, size=11)
+
+        elif qtype in ('truefalse', 'tf', 'true_false'):
+            p_tf = doc.add_paragraph()
+            p_tf.paragraph_format.left_indent  = Inches(0.35)
+            p_tf.paragraph_format.space_before = Pt(1)
+            p_tf.paragraph_format.space_after  = Pt(1)
+            _run(p_tf, '(True or False)', italic=True, size=11)
+
+        # Answer line
+        p_ans = doc.add_paragraph()
+        p_ans.paragraph_format.left_indent  = Inches(0.35)
+        p_ans.paragraph_format.space_before = Pt(2)
+        p_ans.paragraph_format.space_after  = Pt(7)
+        _run(p_ans, 'Answer: ', bold=True, size=11)
+        ans_val = q.get('answer') or '—'
+        _run(p_ans, str(ans_val), size=11)
+        if q.get('answer_text') and not q.get('_invalid_tf'):
+            _run(p_ans, f'  ({q["answer_text"]})', italic=True, size=10)
+
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
 
 
 # ============================================================
@@ -579,7 +880,6 @@ def save_tos():
 
     # ── Save to DB ───────────────────────────────────────
     try:
-        # Store topics + cilos together in topics_json
         topics_json_safe  = _dump_topics_json(valid_topics, cilos)
         quizzes_json_safe = json.dumps(quizzes_data, ensure_ascii=False)
 
@@ -634,6 +934,7 @@ def save_tos():
             fam_pct      = fam_pct,
             int_pct      = int_pct,
             cre_pct      = cre_pct,
+            master_id    = tos.id,   # ← passed so the preview can render a download link
         )
     except Exception as e:
         logger.exception("Failed to render quiz preview template: %s", e)
@@ -686,14 +987,13 @@ def save_selected():
     if not selected_quizzes:
         return jsonify({"error": "None of the selected indices matched valid questions."}), 400
 
-    # Preserve cilos from parent
     _, parent_cilos = _parse_topics_json(parent.topics_json or "[]")
 
     try:
         new_record = TosRecord(
             user_id      = current_user.id,
             title        = parent.title + " (Selected)",
-            topics_json  = parent.topics_json,   # keeps cilos
+            topics_json  = parent.topics_json,
             quizzes_json = json.dumps(selected_quizzes, ensure_ascii=False),
             total_items  = len(selected_quizzes),
             date_created = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -724,7 +1024,6 @@ def view_tos(id):
         flash("You do not have permission to view this.", "error")
         return redirect(url_for("dashboard.index"))
 
-    # Parse topics + CILOs from topics_json
     topics_data, cilos = _parse_topics_json(record.topics_json)
 
     quizzes_data = []
@@ -738,9 +1037,9 @@ def view_tos(id):
     total_items = len(quizzes_data) if record.is_derived else (record.total_items or 0)
 
     # Always use the *configured* Bloom percentages — never back-calculate from
-# actual item counts, because rounding on small item totals will skew them.
-# Topics store fam_pct/int_pct/cre_pct from the original save; fall back to
-# subject_type defaults only for legacy records that predate this field.
+    # actual item counts (rounding on small totals skews the displayed %).
+    # Topics store fam_pct/int_pct/cre_pct from the original save; fall back to
+    # subject_type defaults only for legacy records that predate this field.
     if topics_data and topics_data[0].get("fam_pct") is not None:
         fam_pct = int(topics_data[0]["fam_pct"])
         int_pct = int(topics_data[0]["int_pct"])
@@ -749,7 +1048,7 @@ def view_tos(id):
         stype = getattr(record, 'subject_type', 'nonlab') or 'nonlab'
         if stype == 'lab': fam_pct, int_pct, cre_pct = 20, 30, 50
         else:              fam_pct, int_pct, cre_pct = 50, 30, 20
-        
+
     parent_record = None
     if record.is_derived and record.parent_id:
         parent_record = TosRecord.query.get(record.parent_id)
@@ -769,7 +1068,66 @@ def view_tos(id):
 
 
 # ============================================================
-# 5. DELETE RECORD
+# 5. DOWNLOAD DOCX
+# ============================================================
+@dashboard_bp.route("/download_docx/<int:id>")
+@login_required
+def download_docx(id):
+    record = TosRecord.query.get_or_404(id)
+    if not current_user.is_admin and record.user_id != current_user.id:
+        flash("You do not have permission to download this.", "error")
+        return redirect(url_for("dashboard.index"))
+
+    topics_data, cilos = _parse_topics_json(record.topics_json)
+
+    quizzes_data = []
+    if record.quizzes_json:
+        try: quizzes_data = json.loads(record.quizzes_json)
+        except Exception: pass
+
+    if record.is_derived and quizzes_data:
+        topics_data = recompute_topics_for_derived(record.topics_json, quizzes_data)
+
+    total_items = len(quizzes_data) if record.is_derived else (record.total_items or 0)
+
+    if topics_data and topics_data[0].get("fam_pct") is not None:
+        fam_pct = int(topics_data[0]["fam_pct"])
+        int_pct = int(topics_data[0]["int_pct"])
+        cre_pct = int(topics_data[0]["cre_pct"])
+    else:
+        stype = getattr(record, 'subject_type', 'nonlab') or 'nonlab'
+        if stype == 'lab': fam_pct, int_pct, cre_pct = 20, 30, 50
+        else:              fam_pct, int_pct, cre_pct = 50, 30, 20
+
+    try:
+        buf = _build_docx(
+            title       = record.title,
+            cilos       = cilos,
+            topics      = topics_data,
+            quizzes     = quizzes_data,
+            fam_pct     = fam_pct,
+            int_pct     = int_pct,
+            cre_pct     = cre_pct,
+            total_items = total_items,
+        )
+    except Exception as e:
+        logger.exception("DOCX generation failed: %s", e)
+        flash("Failed to generate DOCX file.", "error")
+        return redirect(url_for("dashboard.view_tos", id=id))
+
+    safe_title = re.sub(r'[^\w\s-]', '', record.title).strip().replace(' ', '_')[:60]
+    filename   = f"{safe_title or 'TOS'}.docx"
+
+    return send_file(
+        buf,
+        as_attachment  = True,
+        download_name  = filename,
+        mimetype       = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    )
+
+
+# ============================================================
+# 6. DELETE RECORD
 # ============================================================
 @dashboard_bp.route("/delete/<int:id>")
 @login_required

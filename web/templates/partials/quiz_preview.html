@@ -30,7 +30,32 @@
 .spec-table tbody td{text-align:center;font-size:12px;}.spec-table tbody td:first-child{text-align:left;font-weight:600;padding-left:10px;}.spec-table tbody tr:hover td{background:rgba(0,0,0,0.02);}
 .spec-table tfoot tr td{background:var(--pv-bg-tfoot);font-weight:700;font-size:12px;text-align:center;border-top:2px solid var(--pv-border);}.spec-table tfoot tr td:first-child{text-align:right;padding-right:14px;}
 
-.pv-test-header{font-family:'DM Serif Display',serif;font-size:18px;color:var(--pv-blue);margin-top:28px;margin-bottom:4px;border-bottom:2px solid var(--pv-border);padding-bottom:6px;}.pv-test-desc{font-size:13px;color:var(--pv-text-sub);font-style:italic;margin-bottom:16px;}
+/* ══ Test Section Header — leveled (name + instruction on same line) ══ */
+.pv-test-section{
+  display:flex;
+  align-items:baseline;
+  gap:12px;
+  flex-wrap:wrap;
+  margin-top:28px;
+  margin-bottom:14px;
+  border-bottom:2px solid var(--pv-border);
+  padding-bottom:6px;
+}
+.pv-test-header{
+  font-family:'DM Serif Display',serif;
+  font-size:18px;
+  color:var(--pv-blue);
+  margin:0;
+  flex-shrink:0;
+  line-height:1.2;
+}
+.pv-test-desc{
+  font-size:13px;
+  color:var(--pv-text-sub);
+  font-style:italic;
+  margin:0;
+  line-height:1.4;
+}
 
 .pv-toolbar{display:flex;align-items:center;gap:8px;margin:16px 0 10px;padding:8px 12px;background:var(--pv-bg-toolbar);border:1px solid var(--pv-border);border-radius:8px;font-size:13px;transition:background 0.25s;}.pv-toolbar button{background:var(--pv-bg-btn);border:1.5px solid var(--pv-border-btn);border-radius:7px;padding:5px 12px;cursor:pointer;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;color:var(--pv-text);transition:background 0.15s,border-color 0.15s,color 0.15s;}.pv-toolbar button:hover{background:var(--pv-blue-light);border-color:var(--pv-blue-border);color:var(--pv-blue);}#preview-selected-count{margin-left:auto;color:var(--pv-blue);font-weight:700;font-size:13px;}
 
@@ -40,11 +65,17 @@
 .choices{list-style:none;padding:0;margin:0 0 10px;display:flex;flex-direction:column;gap:5px;}.choices li{padding:7px 12px;border-radius:7px;background:var(--pv-bg-choice);border:1px solid var(--pv-border);font-size:13px;color:var(--pv-text);}.choices li.correct{background:var(--pv-bg-correct);border-color:var(--pv-green-border);color:var(--pv-text-correct);font-weight:600;}
 .tf-note{font-size:13px;color:var(--pv-text-sub);font-style:italic;margin-bottom:10px;}
 .answer-block{font-size:13px;color:var(--pv-text);background:var(--pv-bg-answer);padding:10px 14px;border-left:3px solid var(--pv-green);border-radius:6px;}.answer-block .answer-text{font-size:12px;color:var(--pv-text-sub);margin-top:4px;}
-.pv-actions{display:flex;gap:10px;justify-content:center;margin-top:28px;padding-top:20px;border-top:1px solid var(--pv-border);flex-wrap:wrap;}.pv-actions button{padding:10px 22px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s,color 0.15s;border:none;}
+
+/* ══ Actions ══ */
+.pv-actions{display:flex;gap:10px;justify-content:center;margin-top:28px;padding-top:20px;border-top:1px solid var(--pv-border);flex-wrap:wrap;}
+.pv-actions button,.pv-actions a.pv-btn{padding:10px 22px;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:background 0.15s,color 0.15s;border:none;text-decoration:none;display:inline-flex;align-items:center;gap:6px;}
 #quiz-preview-save{background:var(--pv-blue);color:#fff;}#quiz-preview-save:hover{background:var(--pv-blue-hover);}
 #quiz-preview-save-selected{background:var(--pv-amber);color:#fff;}#quiz-preview-save-selected:hover{background:var(--pv-amber-hover);}#quiz-preview-save-selected:disabled{background:var(--pv-border)!important;color:var(--pv-text-muted)!important;cursor:not-allowed!important;}
+a.pv-btn-docx{background:var(--pv-bg-btn);color:var(--pv-text);border:1.5px solid var(--pv-border-btn)!important;}
+a.pv-btn-docx:hover{background:var(--pv-blue-light);border-color:var(--pv-blue-border)!important;color:var(--pv-blue);}
 #quiz-preview-close{background:var(--pv-bg-btn-close);color:var(--pv-text-close);border:1.5px solid var(--pv-border-close)!important;}#quiz-preview-close:hover{background:var(--pv-border);}
-@media(max-width:900px){.spec-table th,.spec-table td{font-size:11px;padding:5px;}}
+
+@media(max-width:900px){.spec-table th,.spec-table td{font-size:11px;padding:5px;}.pv-test-section{flex-direction:column;gap:4px;}.pv-test-header{font-size:16px;}}
 </style>
 
 <div id="quiz-preview-card" role="region" aria-label="Quiz preview">
@@ -143,10 +174,14 @@
 
   <ol class="questions" aria-live="polite">
     {% for q in quizzes %}
+
+      {# ── Test section header: name and instruction leveled on the same line ── #}
       {% if q.test_header and (loop.first or q.test_header != quizzes[loop.index0 - 1].test_header) %}
-        <div style="margin-top:32px;margin-bottom:16px;">
+        <div class="pv-test-section">
           <h3 class="pv-test-header">{{ q.test_header }}</h3>
-          {% if q.test_description %}<p class="pv-test-desc">{{ q.test_description }}</p>{% endif %}
+          {% if q.test_description %}
+            <span class="pv-test-desc">{{ q.test_description }}</span>
+          {% endif %}
         </div>
       {% endif %}
 
@@ -185,6 +220,14 @@
   <div class="pv-actions" role="group" aria-label="Preview actions">
     <button id="quiz-preview-save">Done</button>
     <button id="quiz-preview-save-selected" disabled title="Select at least one question to enable">Save Selected</button>
+    {% if master_id %}
+    <a href="{{ url_for('dashboard.download_docx', id=master_id) }}"
+       class="pv-btn pv-btn-docx"
+       target="_blank"
+       title="Download as Word document (long bond paper, Arial, B&W)">
+      ⬇ Download DOCX
+    </a>
+    {% endif %}
     <button id="quiz-preview-close">Close Preview</button>
   </div>
 
