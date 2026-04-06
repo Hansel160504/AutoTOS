@@ -16,17 +16,13 @@ def login():
         return redirect(url_for("dashboard.index"))
 
     if request.method == "POST":
-        email    = request.form.get("email",    "").strip()
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
-        user = User.query.filter_by(email=email).first()
+        user = User.query.filter_by(username=username).first()
 
-        if not user:
-            flash("Email not found.", "error")
-            return redirect(url_for("auth.login"))
-
-        if not check_password_hash(user.password, password):
-            flash("Incorrect password.", "error")
+        if not user or not check_password_hash(user.password, password):
+            flash("Invalid username or password.", "error")
             return redirect(url_for("auth.login"))
 
         if not user.active:
@@ -35,7 +31,6 @@ def login():
 
         login_user(user)
 
-        # Hard split — admins never touch the faculty dashboard
         if user.is_admin:
             return redirect(url_for("admin.index"))
         return redirect(url_for("dashboard.index"))
@@ -51,11 +46,11 @@ def signup():
         return redirect(url_for("dashboard.index"))
 
     if request.method == "POST":
-        name     = request.form.get("name",     "").strip()
-        email    = request.form.get("email",    "").strip().lower()
+        name     = request.form.get("name", "").strip()
+        username = request.form.get("username", "").strip().lower()
         password = request.form.get("password", "")
 
-        if not name or not email or not password:
+        if not name or not username or not password:
             flash("All fields are required.", "error")
             return redirect(url_for("auth.signup"))
 
@@ -63,14 +58,15 @@ def signup():
             flash("Password must be at least 6 characters.", "error")
             return redirect(url_for("auth.signup"))
 
-        existing = User.query.filter_by(email=email).first()
+        existing = User.query.filter_by(username=username).first()
         if existing:
-            flash("An account with that email already exists.", "error")
+            flash("Username already taken.", "error")
             return redirect(url_for("auth.signup"))
 
+        # create new user here
         user = User(
             name         = name,
-            email        = email,
+            username=username,
             password     = generate_password_hash(password),
             is_admin     = False,
             active       = True,

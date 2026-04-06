@@ -1,4 +1,3 @@
-# ai_model.py
 # AutoTOS AI module — Ollama backend
 #
 # Migration from llama-cpp-python → Ollama:
@@ -10,42 +9,66 @@
 # ── Patch history ──────────────────────────────────────────────────────────
 # v3.5  Fix 1 – AUTOTOS_INSTRUCTION: added "All choices MUST be unique"
 #       Fix 2 – _TF_HINT: added "Do NOT use negation words"
-#       Fix 3 – MAX_TOKENS_SINGLE[mcq]: 250 → 350 (max observed output ~300 tok)
-#       Fix 4 – _is_valid_answer: removed false-positive sentence_choices rule;
-#                replaced with correct duplicate-choice detection
+#       Fix 3 – MAX_TOKENS_SINGLE[mcq]: 250 → 350
+#       Fix 4 – _is_valid_answer: removed false-positive sentence_choices rule
 #       Fix 5 – _is_valid_tf: added double-negative guard
-#                (negation in statement + answer=false → confusing exam question)
 #
-# v3.6  Opt 1 – Token budgets recalibrated from real log data (50 questions):
-#                MCQ  350 → 304  (observed max ≈248 tok; 304 = max+20% headroom)
-#                TF   160 → 256  (6/25 calls were truncated at 160 — root cause
-#                                 of sporadic GENERATION FAILED items)
-#                Open 200 → 256  (2/15 calls hit the ceiling)
-#       Opt 2 – Added num_ctx=768 to Ollama options; caps KV-cache to match
-#                actual sequence length (~570 tok max), reducing memory pressure
-#                and slightly accelerating per-token attention.
-#       Opt 3 – Parallel generation via ThreadPoolExecutor (GENERATION_WORKERS,
-#                default 4).  Full speedup requires OLLAMA_NUM_PARALLEL ≥ workers
-#                set in the Ollama container; even without it, Python-side
-#                overhead (prompt building, JSON parsing, validation, retries) is
-#                parallelised, eliminating ~1-2 s dead-time between Ollama calls.
-#       Opt 4 – Thread-safe seen_fps (fp_lock) and seen_stems (_stems_lock) so
-#                duplicate-detection stays correct under concurrent generation.
-#       Opt 5 – GENERATION_WORKERS exposed as env var for easy tuning.
+# v3.6  Opt 1 – Token budgets recalibrated from real log data
+#       Opt 2 – num_ctx=768 added to Ollama options
+#       Opt 3 – Parallel generation via ThreadPoolExecutor
+#       Opt 4 – Thread-safe seen_fps and seen_stems
+#       Opt 5 – GENERATION_WORKERS exposed as env var
 #
-# v3.7  Fix 6 – Answer-based secondary fingerprint (_answer_fingerprint).
-#                Q4/Q5 pattern: different question wording, same concept, same
-#                answer → both fingerprints checked; duplicate rejected on retry.
+# v3.7  Fix 6 – Answer-based secondary fingerprint
 #       Fix 7 – Semantic-duplicate choice detection via pairwise Jaccard
-#                similarity.  Catches Q16 pattern where all 4 choices say the
-#                same thing with different verbs (share/access/facilitate/allow).
-#                Threshold: any two choices with >65% word overlap → reject.
-#       Fix 8 – AUTOTOS_INSTRUCTION reinforced: answer choice must directly
-#                address the question asked.  Reduces Q12-style mismatch where
-#                the model selects a factually related but non-answering option.
-#       Fix 9 – Warm-up replaced with a lightweight model-load ping (1 token,
-#                no JSON format).  Eliminates the spurious "No JSON found"
-#                WARNING that appeared on every container start.
+#       Fix 8 – AUTOTOS_INSTRUCTION reinforced
+#       Fix 9 – Warm-up replaced with lightweight model-load ping
+#
+# v3.8  Fix 10 – Bloom label rename (dataset v5+)
+#
+# v3.9  Opt 6 – BLOOM_HINTS injected into build_training_prompt (reverted v4.0)
+#
+# v4.0  PROMPT-1 – build_training_prompt() rewritten to match training format.
+#       PROMPT-2 – Verbose injection removed (BLOOM_HINTS, base_rules, type_rules).
+#       PROMPT-3 – _TF_HINT replaced with single inline line for tf type.
+#       PROMPT-4 – avoid_block trimmed from 6 → 3 most-recent questions.
+#       PROMPT-5 – num_ctx raised from 768 → 2048.
+#       PROMPT-6 – BLOOM_HINTS moved to retry path only (attempt >= 3).
+#
+# v4.1  Fix 11 – _strip_choice_letter_prefix(): strip embedded "A ", "B. ",
+#                "C) " prefixes that the model echoes inside choice text.
+#       Fix 12 – _is_valid_blank_completion(): reject MCQ where stem has blank
+#                but choices are full sentences incompatible with the stem.
+#       Fix 13 – chunk_text() word-boundary guard: never cut mid-token.
+#
+# v4.2  Opt 7  – CHUNK_SIZE: 800 → 1500 chars, CHUNK_OVERLAP: 30 → 60.
+#                Safe within num_ctx=1024: worst-case total ~880 tokens.
+#                Larger context gives the model more factual grounding per
+#                question, reducing hallucination and improving answer accuracy.
+#
+#       Fix 14 – TF semantic-duplicate detection: _is_tf_semantic_duplicate()
+#                computes Jaccard similarity on content words between the
+#                candidate TF statement and all previously accepted TF
+#                statements for the same concept. Threshold J >= 0.55 rejects
+#                near-identical rewrites (e.g. Q21-Q25 all being
+#                "ICTs used for warfare -> false").
+#                Root cause: _question_fingerprint() strips so aggressively
+#                that "primarily used for warfare" and "mainly used for
+#                warfare" produce different fingerprints and both pass.
+#                A content-word Jaccard check catches these before they escape.
+#
+#       Fix 15 – TF answer-balance nudge: _tf_balance_note() tracks true/false
+#                answer counts per concept in a shared dict. When a concept
+#                already has >= 2 TF answers of the same polarity and zero of
+#                the opposite, a one-line note is appended to the prompt
+#                ("Vary the answer — try a statement that is TRUE/FALSE.")
+#                This directly caused Q21-Q25 and Q32-Q34 repetition.
+#
+#       Opt 8  – Open-ended bloom+concept tracker: _register_open_question()
+#                records every (bloom, concept) pair that has been generated.
+#                _open_diversity_note() returns a nudge when the same combo
+#                is attempted again, steering the model toward a different
+#                angle within the same Bloom's level and topic.
 # ============================================================
 
 import re
@@ -59,7 +82,7 @@ from io import BytesIO
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Set, Tuple
 import os
 import hashlib
 import logging
@@ -80,16 +103,16 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "autotos")
 OLLAMA_TIMEOUT  = int(os.environ.get("OLLAMA_TIMEOUT", "300"))
 
-# Opt 3: parallel workers — set OLLAMA_NUM_PARALLEL to the same value in Ollama
-# for true parallel generation; without it, Python overhead is still parallelised.
-# Default is 2 for CPU (empirically optimal — 4 workers on CPU gives only 1.3x
-# speedup because each call takes 3x longer due to time-slicing).
-# Set to 6 if you have a GPU with ≥8 GB VRAM.
 GENERATION_WORKERS = int(os.environ.get("GENERATION_WORKERS", "2"))
 
 MAX_RETURN    = 50_000
-CHUNK_SIZE    = 800
-CHUNK_OVERLAP = 30
+
+# Opt 7 (v4.2): increased from 800 -> 1500 chars.
+# At ~4 chars/token this is ~375 tokens of context.
+# With num_ctx=1024: 375 (ctx) + 160 (system+spec) + 304 (output) + 60 (retry)
+# = ~899 tokens worst-case — safely within the 1024 window.
+CHUNK_SIZE    = 1500
+CHUNK_OVERLAP = 60   # ~4% of chunk size (was 30/800 = 3.75%)
 
 BASE_DIR        = os.path.dirname(__file__)
 CACHE_DIR       = os.path.join(BASE_DIR, ".extracted_cache")
@@ -101,12 +124,8 @@ logger.info("Ollama config: base_url=%s model=%s timeout=%ds",
             OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT)
 
 # =====================================================
-# TOKEN BUDGETS  (Opt 1 — recalibrated from 60-question log)
+# TOKEN BUDGETS
 # =====================================================
-# Formula: round_up(observed_max_tokens * 1.20, 16)
-# MCQ:  max observed ≈248 tok  → 304   (was 350 — modest tightening)
-# TF:   max observed ≈202 tok  → 256   (was 160 — 6/25 calls were TRUNCATED)
-# Open: max observed ≈201 tok  → 256   (was 200 — 2/15 calls hit the ceiling)
 MAX_TOKENS_SINGLE: Dict[str, int] = {
     "mcq":  304,
     "tf":   256,
@@ -117,47 +136,39 @@ MAX_TOKENS_SINGLE: Dict[str, int] = {
 # BLOOM KEYWORDS
 # =====================================================
 BLOOM_KEYWORDS: Dict[str, List[str]] = {
-    "Knowledge":  ["Define", "Identify", "Describe", "Recognize", "Explain", "Recite", "Illustrate"],
-    "Understand": ["Summarize", "Interpret", "Classify", "Compare", "Contrast", "Infer", "Paraphrase"],
-    "Apply":      ["Solve", "Use", "Complete", "Relate", "Transfer", "Articulate", "Discover"],
-    "Analyze":    ["Contrast", "Connect", "Devise", "Correlate", "Distill", "Conclude", "Categorize"],
-    "Evaluate":   ["Criticize", "Judge", "Defend", "Appraise", "Prioritize", "Reframe", "Grade"],
-    "Create":     ["Design", "Develop", "Modify", "Invent", "Write", "Rewrite", "Collaborate"],
+    "Remembering":   ["Define", "Identify", "Describe", "Recognize", "Explain", "Recite", "Illustrate"],
+    "Understanding": ["Summarize", "Interpret", "Classify", "Compare", "Contrast", "Infer", "Paraphrase"],
+    "Applying":      ["Solve", "Use", "Complete", "Relate", "Transfer", "Articulate", "Discover"],
+    "Analyzing":     ["Contrast", "Connect", "Devise", "Correlate", "Distill", "Conclude", "Categorize"],
+    "Evaluating":    ["Criticize", "Judge", "Defend", "Appraise", "Prioritize", "Reframe", "Grade"],
+    "Creating":      ["Design", "Develop", "Modify", "Invent", "Write", "Rewrite", "Collaborate"],
 }
 
-def get_bloom_cue_line(bloom: str) -> str:
-    cues = BLOOM_KEYWORDS.get(bloom, [])
-    if not cues: return ""
-    return (
-        "- Cognitive cues (embody this level — do NOT open the question with these words): "
-        + ", ".join(cues)
-    )
+# PROMPT-6: BLOOM_HINTS retained but only injected on retry attempt >= 3
+BLOOM_HINTS: Dict[str, str] = {
+    "Remembering":   "Recall a specific fact, term, or definition from the context.",
+    "Understanding": "Explain the main idea or the reason something works the way it does.",
+    "Applying":      "Show how to use the concept in a concrete scenario or task.",
+    "Analyzing":     "Identify a relationship, cause, difference, or underlying pattern.",
+    "Evaluating":    "Judge which option is better, or justify a choice with evidence.",
+    "Creating":      "Propose, design, or plan something new using the concept.",
+}
 
 # =====================================================
 # INSTRUCTIONS
 # =====================================================
-# FIX 1: Added "All choices MUST be unique and different from each other."
-# Without this the model repeatedly generates 4 identical choices.
 AUTOTOS_INSTRUCTION = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. "
-    "Output ONLY this JSON:\n"
-    '{"type":"mcq|truefalse|open_ended","concept":"...","bloom":"...","question":"...",'
-    '"choices":["A text","B text","C text","D text"],"answer":"A|B|C|D|true|false",'
-    '"answer_text":"Why the answer is correct (1-2 sentences)."}\n'
-    "choices field: mcq only. answer_text field: mcq and truefalse only. "
-    "All choices MUST be unique and different from each other. "  # Fix 1 (v3.5)
-    "The correct answer choice MUST directly and specifically answer the question asked — "
-    "not just be related to the topic. "                          # Fix 8 (v3.7)
-    "Answer based ONLY on the provided context."
+    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. Output ONLY this JSON:\n"
+    "{\"type\":\"mcq|truefalse|open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
+    "\"choices\":[\"A text\",\"B text\",\"C text\",\"D text\"],\"answer\":\"A|B|C|D|true|false\","
+    "\"answer_text\":\"Why the answer is correct (1-2 sentences).\"}\n"
+    "choices field: mcq only. answer_text field: mcq and truefalse only. Answer based ONLY on the provided context."
 )
 
 AUTOTOS_INSTRUCTION_OPEN = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. "
-    "Output ONLY this JSON:\n"
-    '{"type":"open_ended","concept":"...","bloom":"...","question":"...","answer":"<complete specific answer>"}\n'
-    "Do NOT include answer_text or choices. "
-    "Answer must be a complete specific response. "
-    "Answer based ONLY on the provided context."
+    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. Output ONLY this JSON:\n"
+    "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"<complete specific answer>\"}\n"
+    "Do NOT include answer_text or choices. Answer must be a complete specific response. Answer based ONLY on the provided context."
 )
 
 TYPE_MAP = {
@@ -170,23 +181,28 @@ OUT_TYPE_NORMALIZE = {
     "open": "open_ended", "open-ended": "open_ended",
 }
 BLOOM_MAP_SINGLE = {
-    "knowledge": "Knowledge", "understand": "Understand", "apply": "Apply",
-    "analyze": "Analyze", "analyse": "Analyze", "evaluate": "Evaluate",
-    "create": "Create", "remembering": "Knowledge", "understanding": "Understand",
-    "applying": "Apply", "analyzing": "Analyze", "evaluating": "Evaluate",
-    "creating": "Create",
+    "knowledge": "Remembering", "understand": "Understanding", "apply": "Applying",
+    "analyze": "Analyzing", "evaluate": "Evaluating", "create": "Creating",
+    "remembering": "Remembering", "understanding": "Understanding",
+    "applying": "Applying", "analyzing": "Analyzing", "evaluating": "Evaluating",
+    "creating": "Creating",
 }
 BLOOM_CYCLE = {
-    "remembering": ["Knowledge", "Understand"],
-    "applying":    ["Apply",     "Analyze"],
-    "creating":    ["Evaluate",  "Create"],
+    "remembering": ["Remembering", "Understanding"],
+    "applying":    ["Applying",    "Analyzing"],
+    "creating":    ["Evaluating",  "Creating"],
 }
 
 def normalize_bloom(bloom: str, slot_index: int = 0) -> str:
-    key = (bloom or "").strip().lower()
+    stripped = (bloom or "").strip()
+    _CANONICAL = {"Remembering", "Understanding", "Applying",
+                  "Analyzing", "Evaluating", "Creating"}
+    if stripped in _CANONICAL:
+        return stripped
+    key = stripped.lower()
     cycle = BLOOM_CYCLE.get(key)
     if cycle: return cycle[slot_index % 2]
-    return BLOOM_MAP_SINGLE.get(key, bloom or "Knowledge")
+    return BLOOM_MAP_SINGLE.get(key, stripped or "Remembering")
 
 def normalize_type(qtype: str) -> str:
     return TYPE_MAP.get((qtype or "").strip().lower(), "mcq")
@@ -200,7 +216,6 @@ def normalize_out_type(raw_type: str) -> str:
 _ollama_ready = False
 
 def _check_ollama() -> bool:
-    """Returns True if Ollama is reachable and the model is available."""
     global _ollama_ready
     try:
         r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10)
@@ -261,6 +276,12 @@ def write_model_cache(key: str, obj: Any):
 
 CACHE_HITS   = 0
 CACHE_MISSES = 0
+
+# =====================================================
+# GENERATION PROGRESS TRACKER
+# =====================================================
+_gen_progress: Dict[str, Any] = {"current": 0, "total": 0, "active": False}
+_gen_progress_lock = threading.Lock()
 
 # =====================================================
 # UTILITIES
@@ -327,6 +348,14 @@ _chunk_cache: Dict[str, List[str]] = {}
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
                overlap: int = CHUNK_OVERLAP) -> List[str]:
+    """
+    Split text into overlapping chunks, snapping to sentence boundaries
+    when possible, or word boundaries otherwise (Fix 13, v4.1).
+
+    Opt 7 (v4.2): CHUNK_SIZE raised from 800 -> 1500 chars so each chunk
+    delivers ~375 tokens of context — nearly double the previous budget —
+    while staying safely within num_ctx=1024.
+    """
     if not text: return []
     text = text.strip(); chunks = []; start = 0
     step = max(1, chunk_size - overlap)
@@ -336,7 +365,13 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
             boundary = max(text.rfind(". ", start, end),
                            text.rfind("! ", start, end),
                            text.rfind("? ", start, end))
-            if boundary > start + chunk_size // 2: end = boundary + 1
+            if boundary > start + chunk_size // 2:
+                end = boundary + 1
+            else:
+                # Fix 13: never cut mid-token
+                word_boundary = text.rfind(" ", start, end)
+                if word_boundary > start:
+                    end = word_boundary
         chunk = text[start:end].strip()
         if chunk: chunks.append(chunk)
         start += step
@@ -357,7 +392,7 @@ def get_chunks_for_text(full_text: str) -> List[str]:
     key = hashlib.md5(full_text[:256].encode("utf-8", errors="ignore")).hexdigest()
     if key not in _chunk_cache:
         _chunk_cache[key] = chunk_text(full_text)
-        logger.info("Chunked document: %d chars → %d chunks", len(full_text), len(_chunk_cache[key]))
+        logger.info("Chunked document: %d chars -> %d chunks", len(full_text), len(_chunk_cache[key]))
     return _chunk_cache[key]
 
 # =====================================================
@@ -434,47 +469,56 @@ def lesson_from_upload(data_or_text: Optional[str]) -> str:
     except Exception: return ""
 
 # =====================================================
-# PROMPT BUILDERS
+# PROMPT BUILDER  (v4.0 — minimal, training-aligned)
 # =====================================================
-# FIX 2: Added "Do NOT use negation words (not, never, no) in the statement."
-# Without this the model generates "X does NOT..." with answer=false,
-# creating confusing double-negative exam questions.
-_TF_HINT = (
-    "[Declarative factual statement only — do NOT ask a question, do NOT give instructions. "
-    "Do NOT use negation words (not, never, no, isn't, doesn't, cannot) in the statement.]"  # ← FIX 2
-)
-
-_RETRY_NOTES = [
-    "",
-    "Different angle — ask about a specific component or detail.\n",
-    "Ask about a consequence or real-world application.\n",
-    "Use a scenario or example.\n",
-]
-
 def _build_avoid_block(seen_questions: List[str]) -> str:
     if not seen_questions: return ""
-    recent = seen_questions[-6:]
-    items  = "; ".join(f'"{q[:50]}"' for q in recent)
-    return f"\n[Avoid repeating: {items}]\n[Focus on a DIFFERENT ASPECT; do NOT restate definitions.]\n"
+    recent = seen_questions[-3:]
+    items  = "; ".join(f'"{q[:40]}"' for q in recent)
+    return f"\n[Different topic angle — avoid repeating: {items}]\n"
 
-def build_training_prompt(instruction: str, qtype: str, bloom: str,
-                           concept: str, context: str,
-                           extra_note: str = "",
-                           attempt_note: str = "",
-                           avoid_questions: Optional[List[str]] = None) -> str:
+
+def build_training_prompt(
+    instruction: str,
+    qtype: str,
+    bloom: str,
+    concept: str,
+    context: str,
+    extra_note: str = "",
+    attempt_note: str = "",
+    avoid_questions: Optional[List[str]] = None,
+    attempt: int = 1,
+) -> str:
     avoid_block = _build_avoid_block(avoid_questions or [])
-    ctx_block   = f"{context}\n{extra_note}{avoid_block}" if (extra_note or avoid_block) else context
-    return (
-        "### Instruction:\n"
-        f"{instruction}\n\n"
+
+    tf_note = ""
+    if qtype == "tf":
+        tf_note = "\n- Type note: Declarative statement only. No question mark. No negation words.\n"
+
+    bloom_note = ""
+    if attempt >= 3:
+        hint = BLOOM_HINTS.get(bloom, "")
+        if hint:
+            bloom_note = f"\n- Bloom hint: {hint}\n"
+
+    retry_line = f"\n{attempt_note.strip()}\n" if attempt_note and attempt_note.strip() else ""
+    ctx_suffix = f"{tf_note}{bloom_note}{retry_line}{avoid_block}"
+
+    user_msg = (
         "### Target Specification:\n"
         f"- Question Type: {qtype}\n"
         f"- Bloom's Level: {bloom}\n"
         f"- Concept: {concept}\n\n"
         "### Context (Source Material):\n"
-        f"{ctx_block}\n\n"
-        "### Response:\n"
+        f"{context}{ctx_suffix}"
     )
+
+    return (
+        f"<|im_start|>system\n{instruction}<|im_end|>\n"
+        f"<|im_start|>user\n{user_msg}<|im_end|>\n"
+        f"<|im_start|>assistant\n"
+    )
+
 
 # =====================================================
 # JSON EXTRACTORS
@@ -532,13 +576,11 @@ def ask_model(prompt: str, max_tokens: int = 200,
         "stream": False,
         "format": "json",
         "options": {
-            "temperature":  temperature,
-            "num_predict":  max_tokens,
-            "num_ctx":      768,    # Opt 2: cap KV-cache to actual seq length
-                                    # (~350 tok input + 256 tok output = ~606 max)
-                                    # reduces memory pressure vs default 2048-4096
-            "top_p":        0.95,
-            "stop": ["### Instruction:", "### Target", "\n###", "<think>", "</s>"],
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "num_ctx":     1024,   # safe for CHUNK_SIZE=1500: worst-case ~899 tokens
+            "top_p":       0.95,
+            "stop":        ["<|im_start|>", "<|im_end|>", "<|endoftext|>"],
         },
     }
 
@@ -584,14 +626,9 @@ def ask_model(prompt: str, max_tokens: int = 200,
         return None
 
 # =====================================================
-# MODEL WARM-UP  (Fix 9 — clean model-load ping)
+# MODEL WARM-UP
 # =====================================================
-# The old warm-up used ask_model(..., max_tokens=20) with format="json".
-# 20 tokens is never enough for a valid JSON response, so it logged a spurious
-# "No JSON found" WARNING on every container start.  The new warm-up calls
-# /api/generate WITHOUT format=json so any short response counts as success.
 def _warmup_model() -> None:
-    """Sends a tiny prompt to force Ollama to load the model into memory."""
     try:
         resp = requests.post(
             f"{OLLAMA_BASE_URL}/api/generate",
@@ -635,6 +672,16 @@ def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(out.get("answer"), bool): out["answer"] = "true" if out["answer"] else "false"
     return out
 
+# =====================================================
+# Fix 11 (v4.1) — CHOICE PREFIX STRIPPER
+# =====================================================
+_CHOICE_LETTER_PREFIX_RE = re.compile(r'^[A-Da-d][).:\s]+\s*')
+
+def _strip_choice_letter_prefix(text: str) -> str:
+    """Remove leading 'A ', 'B. ', 'C) ' style prefixes from a choice string."""
+    return _CHOICE_LETTER_PREFIX_RE.sub("", text).strip()
+
+
 def normalize_generated_question(q: dict, expected_display_type: str,
                                   topic: str, bloom_level: str) -> dict:
     q = q or {}
@@ -646,7 +693,10 @@ def normalize_generated_question(q: dict, expected_display_type: str,
         "type":    display_type,
         "concept": topic,
         "bloom":   bloom_level,
-        "question": strip_question_prefix(clean_text(q.get("question") or q.get("prompt") or ""), is_open_ended=(display_type == "open_ended")),
+        "question": strip_question_prefix(
+            clean_text(q.get("question") or q.get("prompt") or ""),
+            is_open_ended=(display_type == "open_ended")
+        ),
         "choices":  [],
         "answer":   "",
     }
@@ -656,9 +706,13 @@ def normalize_generated_question(q: dict, expected_display_type: str,
     choices_raw = q.get("choices") or q.get("options")
     if isinstance(choices_raw, dict):
         keys = sorted(choices_raw.keys(), key=lambda s: s.upper())
-        out["choices"] = [clean_text(choices_raw[k]) for k in keys][:4]
+        out["choices"] = [
+            _strip_choice_letter_prefix(clean_text(choices_raw[k])) for k in keys
+        ][:4]
     elif isinstance(choices_raw, list):
-        out["choices"] = [clean_text(x) for x in choices_raw][:4]
+        out["choices"] = [
+            _strip_choice_letter_prefix(clean_text(x)) for x in choices_raw
+        ][:4]
     ans = q.get("answer", "")
     if isinstance(ans, bool): out["answer"] = "true" if ans else "false"
     elif isinstance(ans, (int, float)):
@@ -666,20 +720,16 @@ def normalize_generated_question(q: dict, expected_display_type: str,
         out["answer"] = (out["choices"][idx] if out["choices"] and 0 <= idx < len(out["choices"]) else str(ans))
     elif isinstance(ans, str):
         a = ans.strip()
+        a_stripped = _CHOICE_LETTER_PREFIX_RE.sub("", a).strip()
         if display_type == "mcq":
-            if re.fullmatch(r"[A-Da-d]", a) and out["choices"]:
-                idx = ord(a.upper()) - ord("A")
-                out["answer"] = (out["choices"][idx] if 0 <= idx < len(out["choices"]) else a)
+            if re.fullmatch(r"[A-Da-d]", a.strip()) and out["choices"]:
+                idx = ord(a.strip().upper()) - ord("A")
+                out["answer"] = (out["choices"][idx] if 0 <= idx < len(out["choices"]) else a.strip())
             elif re.match(r"^[A-Da-d][).:\s]", a):
-                m = re.match(r"^[A-Da-d][).:\s]+\s*(.+)$", a)
-                if m:
-                    stripped = m.group(1).strip()
-                    matched = next(
-                        (c for c in out["choices"] if c.lower() == stripped.lower()), None
-                    )
-                    out["answer"] = matched or stripped
-                else:
-                    out["answer"] = a
+                matched = next(
+                    (c for c in out["choices"] if c.lower() == a_stripped.lower()), None
+                )
+                out["answer"] = matched or a_stripped
             else:
                 matched = next(
                     (c for c in out["choices"] if c.lower() == a.lower()), None
@@ -748,13 +798,6 @@ def _question_fingerprint(q: dict) -> str:
     concept = re.sub(r"\s+", "_", (q.get("concept") or "").lower().strip())
     return f"{concept}::{qtext}"
 
-# ── Answer-based secondary fingerprint (Fix 6 — catches Q4/Q5 pattern) ────────
-# The question fingerprint only looks at the question text.  Two questions with
-# different wording but the same concept and the same correct answer are still
-# near-duplicates (Q4 "Why is DNS spoofing used?" and Q5 "What is the purpose of
-# DNS spoofing?" both answer "To redirect users to malicious websites").
-# This secondary fingerprint keys on concept + normalised answer text so that
-# duplicate is caught on the retry even if question text diverges.
 _ANS_FP_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
     r'that|this|with|as|from|they|their|can|will|may|has|have|used|'
@@ -763,9 +806,6 @@ _ANS_FP_SW = re.compile(
 )
 
 def _answer_fingerprint(q: dict) -> Optional[str]:
-    """MCQ only — returns a key of concept + stripped answer text.
-    Returns None for TF/open (answer values are either too short or too long
-    to be useful discriminators)."""
     if (q.get("type") or "").lower() != "mcq":
         return None
     ans = clean_text(str(q.get("answer") or "")).lower()
@@ -797,47 +837,211 @@ def _answer_matches_explanation(answer_letter, choices, answer_text):
         return False, best_letter
     return True, answer_letter
 
-# ── Semantic-duplicate choice detection (Fix 7 — catches Q16 pattern) ──────────
-# Q16: all 4 choices say "share/enable/facilitate/allow hardware and software
-# resources without physical proximity" — different verbs, identical content.
-# The duplicate-text check misses these because the strings differ.
-# Detection: extract content words (len>5) from each choice. If ≥4 such words
-# appear in ALL choices the options lack discriminating content and are useless.
-# Threshold of 4 was calibrated against real outputs:
-#   Q16 (bad):  {hardware, software, resources, physical, proximity} → 5 in all → reject ✓
-#   Q19 (good): {firewall, system, network} only 3 in all → keep ✓
 _SEM_DUP_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
     r'that|this|these|those|with|as|from|into|about|which|how|what|does|do|'
     r'not|can|will|may|has|have|had|been|being|they|their|such|each|used|'
     r'using|allows|allow|makes|make|uses|use|helps|help|enables|enable|'
-    r'provides|provide|requires|require|ensures|ensure)\b',
+    r'provides|provide|requires|require|ensures|ensure|offer|offers)\b',
     re.IGNORECASE
 )
 
 def _has_semantic_duplicate_choices(choices: list) -> bool:
-    """Returns True when all choices convey the same content (Q16 pattern)."""
-    if not choices or len(choices) < 4:
+    if not choices or len(choices) < 2:
         return False
 
     def _content(text: str) -> set:
         t = _SEM_DUP_SW.sub(" ", text.lower())
-        return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 5}
+        return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 4}
 
     word_sets = [_content(c) for c in choices]
-    if any(not ws for ws in word_sets):
-        return False
+    non_empty = [ws for ws in word_sets if ws]
+    if len(non_empty) >= 2:
+        common = non_empty[0].copy()
+        for ws in non_empty[1:]:
+            common &= ws
+        if len(common) >= 3:
+            logger.info("MCQ rejected: all-choices share %d content words: %r",
+                        len(common), sorted(common))
+            return True
 
-    # Words present in every single choice
-    common = word_sets[0].copy()
-    for ws in word_sets[1:]:
-        common &= ws
-
-    if len(common) >= 4:
-        logger.info("MCQ rejected: semantic-duplicate choices — %d shared content words: %r",
-                    len(common), sorted(common))
-        return True
+    for i in range(len(word_sets)):
+        for j in range(i + 1, len(word_sets)):
+            a, b = word_sets[i], word_sets[j]
+            if len(a) >= 4 and len(b) >= 4:
+                union = a | b
+                if union:
+                    jaccard = len(a & b) / len(union)
+                    if jaccard >= 0.65:
+                        logger.info(
+                            "MCQ rejected: pairwise near-duplicate choices "
+                            "(J=%.2f): %r vs %r",
+                            jaccard, choices[i][:60], choices[j][:60],
+                        )
+                        return True
     return False
+
+# =====================================================
+# Fix 12 (v4.1) — BLANK-COMPLETION VALIDATOR
+# =====================================================
+_BLANK_STEM_RE = re.compile(r"_{4,}|\.{3,}\s*$")
+_FULL_SENTENCE_OPENER_RE = re.compile(
+    r"^(it (is|was|can|will|has|does|did|should|would|could|must|might)\b|"
+    r"by (the|a|an|its|this|that|making|allowing|enabling|providing|using|doing|giving|increasing|reducing|removing|replacing|combining)\b|"
+    r"by [a-z]+ing\b|"
+    r"they (are|were|can|will|have|do)\b|"
+    r"this (is|was|makes|allows|enables|provides|ensures|refers)\b|"
+    r"these (are|were)\b|"
+    r"there (is|are|was|were)\b|"
+    r"to (store|perform|record|connect|display|process|enable|allow|provide|ensure|help|use|make|give|increase|reduce|replace|control|combine|measure|identify|define|describe|analyze|evaluate|create|develop|design|modify)\b|"
+    r"(a|an) [a-z]+ (that|which|for|to|of|in)\b"
+    r")",
+    re.IGNORECASE
+)
+
+def _is_valid_blank_completion(q: dict) -> bool:
+    question = (q.get("question") or "").strip()
+    if not _BLANK_STEM_RE.search(question):
+        return True
+    choices = q.get("choices") or []
+    if not choices:
+        return True
+    bad = sum(1 for c in choices if _FULL_SENTENCE_OPENER_RE.match(c))
+    if bad >= 2:
+        logger.info(
+            "MCQ rejected: fill-in-blank stem with %d full-sentence choices "
+            "(question=%r)", bad, question[:80]
+        )
+        return False
+    return True
+
+# =====================================================
+# Fix 14 (v4.2) — TF SEMANTIC DUPLICATE DETECTION
+# =====================================================
+# Stored as: concept_key -> [(frozenset_of_content_words, answer_str), ...]
+# Shared across threads via tf_concept_lock from generate_from_records().
+# =====================================================
+_TF_SEM_SW = re.compile(
+    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
+    r'that|this|these|those|with|as|from|into|about|which|how|what|does|do|'
+    r'not|can|will|may|has|have|had|been|being|they|their|such|each|used|'
+    r'also|both|than|then|when|where|while|primarily|mainly|often|'
+    r'generally|usually|typically|mostly|largely|rather|instead|'
+    r'whether|either|neither|nor|just|only|always|never|still|even|'
+    r'more|most|less|least|very|quite|somewhat)\b',
+    re.IGNORECASE
+)
+
+def _tf_content_words(question: str) -> frozenset:
+    """Return meaningful content words from a TF statement."""
+    q = re.sub(r"[^\w\s]", " ", question.lower())
+    q = _TF_SEM_SW.sub(" ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return frozenset(w for w in q.split() if len(w) > 3)
+
+def _is_tf_semantic_duplicate(
+    candidate_q: dict,
+    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
+    tf_lock: threading.Lock,
+) -> bool:
+    """
+    Fix 14 (v4.2): Jaccard similarity check for TF questions.
+    Rejects when J >= 0.55 against any previously accepted TF statement
+    for the same concept.  Threshold is lower than MCQ choice dedup (0.65)
+    because TF statements are shorter — fewer words yields higher Jaccard
+    for the same semantic overlap.
+    """
+    concept  = (candidate_q.get("concept") or "").lower().strip()
+    question = candidate_q.get("question") or ""
+    cwords   = _tf_content_words(question)
+    if not cwords:
+        return False
+    with tf_lock:
+        existing = seen_tf_by_concept.get(concept, [])
+        for ex_words, _ in existing:
+            if not ex_words:
+                continue
+            union   = cwords | ex_words
+            jaccard = len(cwords & ex_words) / len(union) if union else 0.0
+            if jaccard >= 0.55:
+                logger.info(
+                    "TF rejected: semantic duplicate (J=%.2f) concept=%r q=%r",
+                    jaccard, concept, question[:70]
+                )
+                return True
+    return False
+
+def _register_tf_question(
+    candidate_q: dict,
+    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
+    tf_lock: threading.Lock,
+) -> None:
+    """Record a successfully accepted TF question in the per-concept tracker."""
+    concept  = (candidate_q.get("concept") or "").lower().strip()
+    question = candidate_q.get("question") or ""
+    answer   = (candidate_q.get("answer") or "").lower().strip()
+    cwords   = _tf_content_words(question)
+    with tf_lock:
+        if concept not in seen_tf_by_concept:
+            seen_tf_by_concept[concept] = []
+        seen_tf_by_concept[concept].append((cwords, answer))
+
+# =====================================================
+# Fix 15 (v4.2) — TF ANSWER-BALANCE NUDGE
+# =====================================================
+def _tf_balance_note(
+    concept: str,
+    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
+    tf_lock: threading.Lock,
+) -> str:
+    """
+    Fix 15 (v4.2): return a balance hint when a concept's TF answers are
+    all the same polarity (>= 2 of one side, 0 of the other).
+    Empty string when no nudge is needed.
+    """
+    with tf_lock:
+        existing = seen_tf_by_concept.get(concept.lower().strip(), [])
+    if len(existing) < 2:
+        return ""
+    true_count  = sum(1 for _, a in existing if a == "true")
+    false_count = sum(1 for _, a in existing if a == "false")
+    if false_count >= 2 and true_count == 0:
+        return "Vary the answer — write a TRUE statement about this concept."
+    if true_count >= 2 and false_count == 0:
+        return "Vary the answer — write a FALSE statement about this concept."
+    return ""
+
+# =====================================================
+# Opt 8 (v4.2) — OPEN-ENDED BLOOM+CONCEPT TRACKER
+# =====================================================
+def _open_bloom_concept_key(topic: str, bloom: str) -> str:
+    return f"{topic.lower().strip()}::{bloom.lower().strip()}"
+
+def _open_diversity_note(
+    topic: str,
+    bloom: str,
+    seen_open_combos: Set[str],
+    open_lock: threading.Lock,
+) -> str:
+    """
+    Opt 8 (v4.2): return a diversity nudge when the (bloom, concept) pair
+    has already produced an open-ended question.  Empty string otherwise.
+    """
+    key = _open_bloom_concept_key(topic, bloom)
+    with open_lock:
+        if key in seen_open_combos:
+            return "Different angle from before — focus on a distinct aspect or example."
+    return ""
+
+def _register_open_question(
+    topic: str,
+    bloom: str,
+    seen_open_combos: Set[str],
+    open_lock: threading.Lock,
+) -> None:
+    key = _open_bloom_concept_key(topic, bloom)
+    with open_lock:
+        seen_open_combos.add(key)
 
 # =====================================================
 # VALIDATORS
@@ -857,22 +1061,15 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
         choices = q.get("choices") or []
         if not answer: return False
         if re.fullmatch(r"[a-d]", ans_low) and not choices: return False
-
         if choices and len(choices) >= 2:
-            # Fix 4b: exact duplicate choices
             stripped = [c.lower().strip() for c in choices if c.strip()]
             if len(stripped) != len(set(stripped)):
                 logger.info("MCQ rejected: duplicate choices detected %r", stripped)
                 return False
-
-            # Fix 7: semantic-duplicate choices (same content, different verbs)
             if _has_semantic_duplicate_choices(choices):
                 return False
-
-            # Fix 8: wire up _answer_matches_explanation (was defined but never called).
-            # If the answer_text (model's own explanation) matches a *different* choice
-            # significantly better than the chosen answer, the model made a selection
-            # error (Q12 pattern: question asks about register SIZE, answer ignores it).
+            if not _is_valid_blank_completion(q):
+                return False
             answer_text_expl = clean_text(str(q.get("answer_text") or ""))
             if answer_text_expl and len(choices) >= 3:
                 ans_idx = next(
@@ -887,7 +1084,6 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
                         logger.info("MCQ rejected: answer doesn't match its own explanation "
                                     "(record answer=%r)", answer[:60])
                         return False
-
         return True
     elif display_type == "truefalse":
         return ans_low in ("true", "false")
@@ -919,15 +1115,6 @@ _TF_TASK_VERBS = re.compile(
     r'interpret|classify|infer|paraphrase|relate|transfer|articulate|discover|'
     r'connect|devise|describe|recognize|recite|illustrate|complete)\b', re.IGNORECASE)
 _TF_WH_QUESTION = re.compile(r'^(what|which|how|why|who|where|when)\b', re.IGNORECASE)
-
-# FIX 5: Double-negative guard for TF questions.
-# A statement containing negation words (not, never, no, etc.) combined with
-# answer=false creates a confusing double-negative that violates standard
-# exam-writing best practice.  77 such records were found in the dataset.
-# Examples:
-#   "Infrastructure security does NOT protect AI data..." answer=false
-#   "CSRF does NOT require unique tokens..." answer=false
-# These get retried so the model produces a clean positive statement instead.
 _TF_NEGATION_IN_STMT = re.compile(
     r"\b(not|never|no|doesn't|don't|isn't|aren't|cannot|can't|won't|"
     r"wouldn't|shouldn't|couldn't|neither|nor)\b",
@@ -946,104 +1133,136 @@ def _is_valid_tf(q: dict) -> bool:
     if question.rstrip().endswith(":"): return False
     if len(question.strip()) < 25: return False
     if _TF_META_STATEMENT_RE.match(question): return False
-
-    # ── FIX 5 ───────────────────────────────────────────────────────────────
-    # Reject double-negative TF: negation word in statement + answer=false.
-    # "X does NOT do Y" (false) means "X actually DOES do Y" — confusing.
-    # Standard exam practice: write statements positively; answer conveys T/F.
-    # ────────────────────────────────────────────────────────────────────────
     if answer == "false" and _TF_NEGATION_IN_STMT.search(question):
         logger.info("TF rejected: double-negative (negation in stmt + answer=false): %r", question[:80])
-        return False  # ← FIX 5
-
+        return False
     return True
 
 # =====================================================
 # SINGLE QUESTION GENERATOR
 # =====================================================
-def _generate_single(topic, prompt_type, display_type, bloom, context, max_tok,
-                     seen_fps, record_idx, seen_questions=None, fp_lock=None,
-                     seen_answer_fps=None, answer_fp_lock=None):
+_RETRY_NOTES = [
+    "",
+    "Try a different angle — focus on a specific component or detail.",
+    "Ask about a consequence or real-world application.",
+    "Use a concrete scenario or example.",
+]
+
+def _generate_single(
+    topic, prompt_type, display_type, bloom, context, max_tok,
+    seen_fps, record_idx,
+    seen_questions=None, fp_lock=None,
+    seen_answer_fps=None, answer_fp_lock=None,
+    # Fix 14/15 (v4.2): TF diversity trackers
+    seen_tf_by_concept=None, tf_concept_lock=None,
+    # Opt 8 (v4.2): open-ended bloom+concept tracker
+    seen_open_combos=None, open_combos_lock=None,
+):
     instruction  = AUTOTOS_INSTRUCTION_OPEN if prompt_type == "open" else AUTOTOS_INSTRUCTION
-    extra_note   = _TF_HINT if prompt_type == "tf" else ""
     MAX_ATTEMPTS = 5
     avoid_list   = list(seen_questions or [])
+
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        temp         = min(0.85, 0.45 + 0.15 * (attempt - 1))
+        temp = min(0.85, 0.45 + 0.15 * (attempt - 1))
+
+        # Base retry note from the static list
         attempt_note = _RETRY_NOTES[min(attempt - 1, len(_RETRY_NOTES) - 1)]
-        retry_bloom  = bloom
-        if attempt > 2 and prompt_type == "tf":
-            retry_bloom = "Knowledge" if attempt == 3 else "Understand"
-        prompt = build_training_prompt(instruction, prompt_type, retry_bloom, topic,
-                                       context, extra_note=extra_note,
-                                       attempt_note=attempt_note,
-                                       avoid_questions=avoid_list)
+
+        # Fix 15 (v4.2): append TF balance nudge, computed fresh each attempt
+        # so it reflects any parallel workers that accepted new TF questions
+        if prompt_type == "tf" and seen_tf_by_concept is not None and tf_concept_lock is not None:
+            balance = _tf_balance_note(topic, seen_tf_by_concept, tf_concept_lock)
+            if balance:
+                attempt_note = f"{attempt_note} {balance}".strip() if attempt_note else balance
+
+        # Opt 8 (v4.2): append open-ended diversity nudge when bloom+concept already seen
+        if prompt_type == "open" and seen_open_combos is not None and open_combos_lock is not None:
+            diversity = _open_diversity_note(topic, bloom, seen_open_combos, open_combos_lock)
+            if diversity:
+                attempt_note = f"{attempt_note} {diversity}".strip() if attempt_note else diversity
+
+        prompt = build_training_prompt(
+            instruction, prompt_type, bloom, topic, context,
+            attempt_note=attempt_note,
+            avoid_questions=avoid_list,
+            attempt=attempt,
+        )
+
         generated = ask_model(prompt, max_tokens=max_tok, temperature=temp)
         if generated is None:
             logger.info("Single gen failed record=%d attempt=%d", record_idx, attempt)
-            time.sleep(0.1 * attempt); continue
+            time.sleep(0.1 * attempt)
+            continue
+
         generated   = _normalize_output_keys(generated)
         candidate_q = normalize_generated_question(generated, display_type, topic, bloom)
         qtext       = (candidate_q.get("question") or "").strip()
         if not qtext: continue
-        if display_type == "truefalse" and not _is_valid_tf(candidate_q):
-            time.sleep(0.1 * attempt); continue
+
+        # TF-specific validation + semantic dedup
+        if display_type == "truefalse":
+            if not _is_valid_tf(candidate_q):
+                time.sleep(0.1 * attempt); continue
+            # Fix 14 (v4.2): reject near-identical TF rewrites
+            if seen_tf_by_concept is not None and tf_concept_lock is not None:
+                if _is_tf_semantic_duplicate(candidate_q, seen_tf_by_concept, tf_concept_lock):
+                    avoid_list.append(_question_stem(candidate_q))
+                    time.sleep(0.1 * attempt); continue
+
         if not _is_valid_answer(candidate_q, display_type):
             logger.info("Invalid answer record=%d attempt=%d ans=%r",
                         record_idx, attempt, candidate_q.get("answer", ""))
             avoid_list.append(qtext[:60]); time.sleep(0.1 * attempt); continue
 
-        # ── Question fingerprint (de-dup by question text) ──────────────────
+        # Global fingerprint dedup (all types)
         fp = _question_fingerprint(candidate_q)
         is_dup = False
         if fp_lock:
             with fp_lock:
-                if fp in seen_fps:
-                    is_dup = True
-                else:
-                    seen_fps.add(fp)
+                if fp in seen_fps: is_dup = True
+                else: seen_fps.add(fp)
         else:
-            if fp in seen_fps:
-                is_dup = True
-            else:
-                seen_fps.add(fp)
+            if fp in seen_fps: is_dup = True
+            else: seen_fps.add(fp)
         if is_dup:
             avoid_list.append(_question_stem(candidate_q))
             time.sleep(0.1 * attempt); continue
 
-        # ── Answer fingerprint (Fix 6 — de-dup by concept + answer text) ────
-        # Catches Q4/Q5 pattern: different question wording, same answer.
+        # MCQ answer fingerprint dedup
         if seen_answer_fps is not None:
             ans_fp = _answer_fingerprint(candidate_q)
             if ans_fp:
                 is_ans_dup = False
                 if answer_fp_lock:
                     with answer_fp_lock:
-                        if ans_fp in seen_answer_fps:
-                            is_ans_dup = True
-                        else:
-                            seen_answer_fps.add(ans_fp)
+                        if ans_fp in seen_answer_fps: is_ans_dup = True
+                        else: seen_answer_fps.add(ans_fp)
                 else:
-                    if ans_fp in seen_answer_fps:
-                        is_ans_dup = True
-                    else:
-                        seen_answer_fps.add(ans_fp)
+                    if ans_fp in seen_answer_fps: is_ans_dup = True
+                    else: seen_answer_fps.add(ans_fp)
                 if is_ans_dup:
                     logger.info("MCQ rejected: same-answer near-duplicate record=%d "
                                 "ans_fp=%r", record_idx, ans_fp[:60])
                     avoid_list.append(_question_stem(candidate_q))
                     time.sleep(0.1 * attempt); continue
 
+        # All checks passed — register in type-specific trackers before returning
+        if display_type == "truefalse" and seen_tf_by_concept is not None and tf_concept_lock is not None:
+            _register_tf_question(candidate_q, seen_tf_by_concept, tf_concept_lock)
+
+        if display_type == "open_ended" and seen_open_combos is not None and open_combos_lock is not None:
+            _register_open_question(topic, bloom, seen_open_combos, open_combos_lock)
+
         return candidate_q
+
     return None
 
 # =====================================================
-# BATCH GENERATOR  (Opt 3 — parallel via ThreadPoolExecutor)
+# BATCH GENERATOR
 # =====================================================
 def generate_from_records(records, max_items=None):
     limit = min(len(records), max_items) if max_items else len(records)
 
-    # ── Build slots (unchanged logic) ──────────────────────────────────────
     topic_slot_counter: Dict[str, List[int]] = {}
     slots = []
     for i in range(limit):
@@ -1073,25 +1292,37 @@ def generate_from_records(records, max_items=None):
             chunk_idx = idxs.pop(0)
             if not idxs: topic_slot_counter.pop(topic_key, None)
             context = chunks[chunk_idx]
-            logger.info("record=%d topic=%r bloom=%s → chunk %d/%d", i+1, topic, bloom, chunk_idx+1, len(chunks))
+            logger.info("record=%d topic=%r bloom=%s -> chunk %d/%d", i+1, topic, bloom, chunk_idx+1, len(chunks))
         else:
             logger.warning("record=%d topic=%r has NO learning material.", i+1, topic)
         slots.append({"record_idx": i, "topic": topic, "bloom": bloom,
                       "prompt_type": prompt_type, "display_type": display_type,
                       "context": context, "record": rec})
 
-    # ── Opt 3/4: shared thread-safe state ──────────────────────────────────
-    _fp_lock         = threading.Lock()   # hard guard — prevents duplicate question fingerprints
-    _answer_fp_lock  = threading.Lock()   # hard guard — prevents same-answer near-duplicates
-    _stems_lock      = threading.Lock()   # soft guard — avoid-list hint across threads
+    # Shared dedup state (all types)
+    _fp_lock         = threading.Lock()
+    _answer_fp_lock  = threading.Lock()
+    _stems_lock      = threading.Lock()
     seen_fps:         set  = set()
     seen_answer_fps:  set  = set()
     seen_stems:       list = []
 
+    # Fix 14/15 (v4.2): TF per-concept tracker
+    _tf_concept_lock: threading.Lock = threading.Lock()
+    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]] = {}
+
+    # Opt 8 (v4.2): open-ended bloom+concept tracker
+    _open_combos_lock: threading.Lock = threading.Lock()
+    seen_open_combos: Set[str] = set()
+
+    with _gen_progress_lock:
+        _gen_progress["current"] = 0
+        _gen_progress["total"]   = len(slots)
+        _gen_progress["active"]  = True
+
     def _run_slot(slot: dict):
-        """Worker: generates one question, updates shared stems on success."""
         with _stems_lock:
-            stems_snapshot = list(seen_stems)   # snapshot so thread isn't blocked during gen
+            stems_snapshot = list(seen_stems)
 
         q = _generate_single(
             slot["topic"], slot["prompt_type"], slot["display_type"],
@@ -1102,7 +1333,14 @@ def generate_from_records(records, max_items=None):
             fp_lock=_fp_lock,
             seen_answer_fps=seen_answer_fps,
             answer_fp_lock=_answer_fp_lock,
+            seen_tf_by_concept=seen_tf_by_concept,
+            tf_concept_lock=_tf_concept_lock,
+            seen_open_combos=seen_open_combos,
+            open_combos_lock=_open_combos_lock,
         )
+
+        with _gen_progress_lock:
+            _gen_progress["current"] += 1
 
         if q is not None:
             stem = _question_stem(q)
@@ -1114,7 +1352,6 @@ def generate_from_records(records, max_items=None):
 
         return slot["record_idx"], slot, q
 
-    # ── Dispatch ───────────────────────────────────────────────────────────
     workers = min(GENERATION_WORKERS, len(slots))
     logger.info("Generating %d questions with %d worker(s)", len(slots), workers)
     slot_start = time.time()
@@ -1130,7 +1367,9 @@ def generate_from_records(records, max_items=None):
     logger.info("All %d questions generated in %.1fs (%.1f s/q avg)",
                 len(slots), elapsed, elapsed / max(len(slots), 1))
 
-    # ── Assemble output in original order ──────────────────────────────────
+    with _gen_progress_lock:
+        _gen_progress["active"] = False
+
     out_questions = []
     for slot, q in results:        # type: ignore[misc]
         if q is not None:
@@ -1181,7 +1420,7 @@ def load_jsonl(path):
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(title="AutoTOS AI Service", version="3.7-ollama")
+app = FastAPI(title="AutoTOS AI Service", version="4.2-ollama")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
 
@@ -1204,6 +1443,11 @@ async def health():
 @app.get("/cache_stats")
 async def cache_stats():
     return get_model_cache_stats()
+
+@app.get("/progress")
+async def generation_progress():
+    with _gen_progress_lock:
+        return dict(_gen_progress)
 
 @app.post("/extract")
 async def extract_text(req: ExtractRequest):

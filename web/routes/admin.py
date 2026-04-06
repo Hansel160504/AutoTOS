@@ -136,7 +136,7 @@ def index():
         TosRecord.query
         .filter_by(is_derived=False)
         .join(User, TosRecord.user_id == User.id)
-        .add_columns(User.name.label("user_name"), User.email.label("user_email"))
+        .add_columns(User.name.label("user_name"), User.username.label("user_email"))
         .order_by(TosRecord.id.desc())
         .limit(8)
         .all()
@@ -145,7 +145,7 @@ def index():
 
     top_users = (
         db.session.query(
-            User.id, User.name, User.email,
+            User.id, User.name, User.username,
             db.func.count(TosRecord.id).label("record_count"),
             db.func.sum(TosRecord.total_items).label("total_items"),
         )
@@ -273,7 +273,7 @@ def records():
         TosRecord.query
         .filter_by(is_derived=False)          # masters only
         .join(User, TosRecord.user_id == User.id)
-        .add_columns(User.name.label("user_name"), User.email.label("user_email"))
+        .add_columns(User.name.label("user_name"), User.username.label("user_email"))
         .order_by(TosRecord.id.desc())
     )
 

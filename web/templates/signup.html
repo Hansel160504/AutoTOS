@@ -208,27 +208,38 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
       {% endwith %}
 
       <form action="/signup" method="POST">
-        <div class="field">
-          <label for="name">Full name</label>
-          <input type="text" id="name" name="name" placeholder="Prof. Jane Santos" required autocomplete="name">
-        </div>
-        <div class="field">
-          <label for="email">Email address</label>
-          <input type="email" id="email" name="email" placeholder="you@university.edu" required autocomplete="email">
-        </div>
-        <div class="field">
-          <label for="password">Password</label>
-          <input type="password" id="password" name="password" placeholder="Minimum 6 characters" required
-                 autocomplete="new-password" oninput="checkStrength(this.value)">
-          <div class="pw-strength">
+    <div class="field">
+        <label for="name">Full Name</label>
+        <input type="text" id="name" name="name" 
+               placeholder="e.g. Prof. Jane Santos" required>
+    </div>
+
+    <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" 
+               placeholder="e.g. jsantos" required autocomplete="username">
+    </div>
+
+    <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" 
+               placeholder="Minimum 6 characters" required oninput="checkStrength(this.value)">
+        <div class="pw-strength">
             <div class="pw-bar" id="pb1"></div>
             <div class="pw-bar" id="pb2"></div>
             <div class="pw-bar" id="pb3"></div>
             <div class="pw-bar" id="pb4"></div>
-          </div>
         </div>
-        <button class="btn-primary" type="submit">Create Account</button>
-      </form>
+    </div>
+
+    <div class="field">
+        <label for="confirm_password">Confirm Password</label>
+        <input type="password" id="confirm_password" name="confirm_password" 
+               placeholder="Repeat your password" required>
+    </div>
+
+    <button class="btn-primary" type="submit">Create Account</button>
+</form>
 
       <div class="form-footer">Already have an account? <a href="/login">Sign in</a></div>
       <p class="terms-note">By registering, you confirm this account is for faculty use only.</p>

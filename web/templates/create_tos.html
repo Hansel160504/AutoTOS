@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Create TOS – AutoTOS</title>
-<!-- ▸ ANTI-FLASH: restore theme before first paint -->
 <script>
 (function(){
     try{ var t=localStorage.getItem('autotos-theme'); if(t==='dark') document.documentElement.setAttribute('data-theme','dark'); }catch(e){}
@@ -32,8 +31,6 @@
     --shadow-sm:   0 1px 3px rgba(0,0,0,0.06);
     --shadow-lg:   0 20px 48px rgba(0,0,0,0.18);
     --bondpaper-w: 900px;
-
-    /* semantic */
     --bg-page:      #f1f5f9;
     --bg-card:      #ffffff;
     --bg-input:     #ffffff;
@@ -52,8 +49,8 @@
     --bondpaper-bg: #ffffff;
     --loading-bg:   #ffffff;
     --progress-bg:  #e2e8f0;
+    --cilo-bg:      #f8fafc;
 }
-
 /* ══ DARK ══ */
 [data-theme="dark"] {
     --navy:        #93c5fd;
@@ -68,7 +65,6 @@
     --red:         #f87171;
     --red-light:   #2d0a0a;
     --green:       #22c55e;
-
     --bg-page:      #0f172a;
     --bg-card:      #1e293b;
     --bg-input:     #0f172a;
@@ -87,29 +83,14 @@
     --bondpaper-bg: #1e293b;
     --loading-bg:   #1e293b;
     --progress-bg:  #334155;
+    --cilo-bg:      #162032;
 }
-
-* { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: 'DM Sans', system-ui, sans-serif;
-    background: var(--bg-page);
-    color: var(--text-main);
-    min-height: 100vh;
-    padding-bottom: 60px;
-    transition: background 0.25s, color 0.25s;
-}
+* { box-sizing:border-box;margin:0;padding:0; }
+body { font-family:'DM Sans',system-ui,sans-serif;background:var(--bg-page);color:var(--text-main);min-height:100vh;padding-bottom:60px;transition:background 0.25s,color 0.25s; }
 
 /* ── Header ── */
-header {
-    background: var(--header-bg);
-    height: 60px;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 0 28px;
-    position: sticky; top: 0; z-index: 200;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-}
-.header-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+header { background:var(--header-bg);height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:200;box-shadow:0 2px 8px rgba(0,0,0,0.25); }
+.header-logo { display:flex;align-items:center;gap:10px;text-decoration:none; }
 .header-logo-mark { width:34px;height:34px;background:var(--blue);border-radius:8px;display:flex;align-items:center;justify-content:center;font-family:'DM Serif Display',serif;font-size:17px;color:white;flex-shrink:0; }
 .header-logo-text { font-family:'DM Serif Display',serif;font-size:19px;color:white;letter-spacing:-0.2px; }
 .header-logo-text span { color:#60a5fa; }
@@ -119,8 +100,6 @@ header nav a:hover { background:rgba(255,255,255,0.08);color:white; }
 header nav a.active { background:rgba(37,99,235,0.25);color:#93c5fd;font-weight:600; }
 header nav a.nav-logout { color:#94a3b8;border:1px solid rgba(255,255,255,0.12);margin-left:6px; }
 header nav a.nav-logout:hover { background:rgba(220,38,38,0.15);border-color:rgba(220,38,38,0.3);color:#fca5a5; }
-
-/* ── Theme toggle ── */
 .theme-toggle { display:flex;align-items:center;gap:7px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:5px 12px 5px 8px;cursor:pointer;transition:background 0.15s;margin-left:8px;flex-shrink:0; }
 .theme-toggle:hover { background:rgba(255,255,255,0.12); }
 .theme-toggle-track { width:32px;height:17px;background:#334155;border-radius:20px;position:relative;transition:background 0.25s;flex-shrink:0; }
@@ -144,30 +123,27 @@ header nav a.nav-logout:hover { background:rgba(220,38,38,0.15);border-color:rgb
 /* ── Fields ── */
 .field { margin-bottom:16px; }
 .field label { display:block;font-size:13px;font-weight:600;color:var(--navy);margin-bottom:6px; }
-.field input[type="text"],
-.field input[type="number"],
-.field select {
-    width:100%;padding:10px 13px;
-    border:1.5px solid var(--border-col);border-radius:var(--radius);
-    font-family:'DM Sans',sans-serif;font-size:14px;
-    color:var(--text-main);background:var(--bg-input);
-    transition:border-color 0.15s,box-shadow 0.15s,background 0.25s;outline:none;
-}
-.field input:focus, .field select:focus { border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,0.10); }
+.field input[type="text"],.field input[type="number"],.field select { width:100%;padding:10px 13px;border:1.5px solid var(--border-col);border-radius:var(--radius);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text-main);background:var(--bg-input);transition:border-color 0.15s,box-shadow 0.15s,background 0.25s;outline:none; }
+.field input:focus,.field select:focus { border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,0.10); }
 .field input::placeholder { color:var(--text-muted); }
 .field select option { background:var(--bg-card);color:var(--text-main); }
-
 #percentValidationMsg { display:none;color:var(--red);font-size:12px;margin-top:6px;font-weight:500; }
-
-#customPercentBlock {
-    background:var(--bg-cpb);border:1px solid var(--border-col);
-    border-radius:var(--radius);padding:14px 16px;margin-top:10px;display:none;
-    transition:background 0.25s,border-color 0.25s;
-}
+#customPercentBlock { background:var(--bg-cpb);border:1px solid var(--border-col);border-radius:var(--radius);padding:14px 16px;margin-top:10px;display:none;transition:background 0.25s,border-color 0.25s; }
 #customPercentBlock .field { margin-bottom:10px; }
 #customPercentBlock .field:last-child { margin-bottom:0; }
 #customPercentBlock label { font-size:12px; }
 #customPercentBlock input { width:120px; }
+
+/* ══ CILO Section ══ */
+.cilo-hint { font-size:12px;color:var(--text-sub);margin-bottom:14px;padding:8px 12px;background:var(--cilo-bg);border-left:3px solid var(--blue);border-radius:6px;line-height:1.5; }
+.cilo-row { display:flex;align-items:flex-start;gap:10px;margin-bottom:10px;animation:fadeIn 0.18s ease; }
+@keyframes fadeIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+.cilo-bullet { flex-shrink:0;width:24px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--blue);font-weight:700;line-height:1; }
+.cilo-number { flex-shrink:0;width:24px;height:36px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:var(--blue);background:var(--blue-light);border-radius:50%; }
+.cilo-input { flex:1;padding:8px 12px;border:1.5px solid var(--border-col);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-main);background:var(--bg-input);outline:none;transition:border-color 0.15s;resize:vertical;min-height:36px; }
+.cilo-input:focus { border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,0.10); }
+.cilo-input::placeholder { color:var(--text-muted); }
+.remove-cilo { padding:6px 11px!important;font-size:12px!important;flex-shrink:0; }
 
 /* ── Topics table ── */
 .topics-table-wrap { overflow-x:auto;border:1px solid var(--border-col);border-radius:var(--radius);margin-bottom:12px; }
@@ -175,8 +151,7 @@ table#tosTable { width:100%;border-collapse:collapse;font-size:13px;background:v
 table#tosTable thead th { padding:10px 14px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;background:var(--bg-thead);border-bottom:1px solid var(--border-col);text-align:left;color:var(--text-sub); }
 table#tosTable tbody td { padding:8px 10px;border-bottom:1px solid var(--border-col);vertical-align:middle; }
 table#tosTable tbody tr:last-child td { border-bottom:none; }
-table#tosTable input[type="text"],
-table#tosTable input[type="number"] { width:100%;padding:8px 10px;border:1.5px solid var(--border-col);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-main);background:var(--bg-input);outline:none;transition:border-color 0.15s,background 0.25s; }
+table#tosTable input[type="text"],table#tosTable input[type="number"] { width:100%;padding:8px 10px;border:1.5px solid var(--border-col);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text-main);background:var(--bg-input);outline:none;transition:border-color 0.15s,background 0.25s; }
 table#tosTable input:focus { border-color:var(--blue); }
 table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;border:1.5px dashed var(--border-col);border-radius:7px;background:var(--bg-file);cursor:pointer;color:var(--text-sub); }
 
@@ -200,14 +175,14 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
 .modal-content p { color:var(--text-sub);font-size:13px;margin-bottom:16px; }
 .modal-actions { margin-top:20px;display:flex;justify-content:flex-end;gap:10px;padding-top:16px;border-top:1px solid var(--border-col); }
 .test-row { display:flex;gap:10px;align-items:center;margin-bottom:10px;padding:10px 12px;background:var(--bg-testrow);border-radius:8px;border:1px solid var(--border-col); }
-.test-row select, .test-row input { padding:7px 10px;border:1.5px solid var(--border-col);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;background:var(--bg-input);color:var(--text-main); }
-.test-row select:focus, .test-row input:focus { border-color:var(--blue); }
+.test-row select,.test-row input { padding:7px 10px;border:1.5px solid var(--border-col);border-radius:7px;font-family:'DM Sans',sans-serif;font-size:13px;outline:none;background:var(--bg-input);color:var(--text-main); }
+.test-row select:focus,.test-row input:focus { border-color:var(--blue); }
 .test-row select { width:160px; }
 .test-row .items-input { width:70px; }
 .test-row .desc-input { flex:1; }
 .total-count-bar { display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--bg-totalbar);border-radius:8px;border:1px solid var(--blue);margin-top:14px;font-size:13px;font-weight:600;color:var(--navy-deep); }
 
-/* ── Loading overlay ── */
+/* ── Loading ── */
 #loadingOverlay { position:fixed;inset:0;background:var(--overlay-bg);z-index:10000;display:none;justify-content:center;align-items:center;backdrop-filter:blur(3px); }
 .loading-card { background:var(--loading-bg);padding:36px 32px 28px;border-radius:16px;box-shadow:var(--shadow-lg);text-align:center;width:320px;display:flex;flex-direction:column;align-items:center;animation:popIn 0.25s cubic-bezier(0.175,0.885,0.32,1.275);border:1px solid var(--border-col); }
 .spinner-wrap { position:relative;width:72px;height:72px;margin-bottom:22px;flex-shrink:0; }
@@ -236,12 +211,10 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
 .bondpaper .preview-tools .right { display:flex;gap:8px; }
 .bondpaper .close-x { position:absolute;right:12px;top:12px;border:none;background:transparent;font-size:20px;cursor:pointer;color:var(--text-muted);width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:background 0.15s,color 0.15s; }
 .bondpaper .close-x:hover { background:var(--bg-cpb);color:var(--text-main); }
-#generatedTOS th { font-size:11px;font-family:'DM Sans',sans-serif;border:1px solid var(--border-col);padding:8px;vertical-align:middle;background:var(--bg-thead);font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--text-sub); }
-#generatedTOS td { border:1px solid var(--border-col);padding:8px;font-size:13px;text-align:center;vertical-align:middle;color:var(--text-main); }
 
 @keyframes spin { to { transform:rotate(360deg); } }
 @keyframes popIn { from{opacity:0;transform:scale(0.94)} to{opacity:1;transform:scale(1)} }
-@media(max-width:720px){ .bondpaper{padding:16px} .page{padding:16px} .theme-toggle-label{display:none} }
+@media(max-width:720px){ .bondpaper{padding:16px} .page{padding:16px} .theme-toggle-label{display:none} .cilo-row{flex-wrap:wrap} }
 </style>
 </head>
 <body>
@@ -252,10 +225,9 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
         <div class="header-logo-text">Auto<span>TOS</span></div>
     </a>
     <nav>
-        <a href="/dashboard/"       class="nav-link">Dashboard</a>
+        <a href="/dashboard/" class="nav-link">Dashboard</a>
         <a href="/dashboard/create" class="nav-link active">Create TOS</a>
-        <a href="/logout"           class="nav-link nav-logout">Logout</a>
-
+        <a href="/logout" class="nav-link nav-logout">Logout</a>
         <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
             <div class="theme-toggle-track"><div class="theme-toggle-thumb"></div></div>
             <span class="theme-toggle-icon" id="themeIcon">🌙</span>
@@ -265,13 +237,12 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
 </header>
 
 <div class="page">
-
     <div class="page-hero">
         <h2>Create Table of Specification</h2>
         <p>Fill in the details below, define your tests, then generate your exam.</p>
     </div>
 
-    <!-- Exam Setup -->
+    <!-- ── Exam Setup ── -->
     <div class="form-card">
         <div class="form-card-title">Exam Setup</div>
         <div class="field">
@@ -298,7 +269,20 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
         </div>
     </div>
 
-    <!-- Topics Table -->
+    <!-- ── Intended Learning Outcomes (CILO) ── -->
+    <div class="form-card">
+        <div class="form-card-title">Cognitive Objectives / Behavioral Dimensions / Thinking Skills</div>
+        <div class="cilo-hint">
+            <strong>Intended Learning Outcomes (CILO)</strong> — List each learning outcome that this exam aims to assess.
+            These will appear on the printed TOS above the specification table.
+        </div>
+        <div id="ciloList"></div>
+        <div class="btn-row">
+            <button type="button" class="btn secondary" id="addCiloBtn">+ Add Learning Outcome</button>
+        </div>
+    </div>
+
+    <!-- ── Topics Table ── -->
     <div class="form-card">
         <div class="form-card-title">Content Outline / Topics</div>
         <div class="topics-table-wrap">
@@ -326,14 +310,14 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
         </div>
     </div>
 
-    <!-- Generate -->
+    <!-- ── Generate ── -->
     <div class="btn-row">
         <button type="button" class="btn primary btn-generate" id="generateTOSQuizBtn">
             ⚡ Generate TOS &amp; Quiz
         </button>
     </div>
 
-    <!-- Preview overlay -->
+    <!-- ── Preview overlay ── -->
     <div id="quiz-preview-area" aria-hidden="true">
         <div class="bondpaper" role="dialog" aria-modal="true">
             <button class="close-x" title="Close preview" id="previewCloseX">&times;</button>
@@ -344,53 +328,12 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
                     <button class="btn primary" id="quiz-preview-save">Save &amp; Done</button>
                 </div>
             </div>
-            <div class="preview-body" id="preview-body">
-                <div id="generatedOutput" style="display:none; margin-top:8px;">
-                    <h3 style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--navy-deep);margin-bottom:14px;">Generated Table of Specification</h3>
-                    <table id="generatedTOS" style="width:100%;border-collapse:collapse;text-align:center;margin-bottom:24px;">
-                        <thead>
-                            <tr>
-                                <th rowspan="3" style="width:25%;">Content Outline</th>
-                                <th rowspan="3" style="width:10%;">Hours</th>
-                                <th colspan="2">Familiarization<br><small>(Remembering/Understanding)</small></th>
-                                <th colspan="2">Integration<br><small>(Applying/Analyzing)</small></th>
-                                <th colspan="2">Creation<br><small>(Evaluating/Creating)</small></th>
-                                <th rowspan="3" style="width:8%;">Total</th>
-                            </tr>
-                            <tr>
-                                <th colspan="2" style="font-style:italic;">— <span id="famPercent">50%</span></th>
-                                <th colspan="2" style="font-style:italic;">— <span id="intPercent">30%</span></th>
-                                <th colspan="2" style="font-style:italic;">— <span id="crePercent">20%</span></th>
-                                <th style="display:none;"></th>
-                            </tr>
-                            <tr>
-                                <th colspan="2">Item Numbers</th>
-                                <th colspan="2">Item Numbers</th>
-                                <th colspan="2">Item Numbers</th>
-                                <th style="display:none;"></th>
-                            </tr>
-                        </thead>
-                        <tbody id="generatedBody"></tbody>
-                        <tfoot>
-                            <tr style="font-weight:700;background:var(--bg-thead);">
-                                <td style="text-align:right;padding-right:10px;">TOTAL</td>
-                                <td id="footTotalHrs">0</td>
-                                <td colspan="2" id="footFamItems">0</td>
-                                <td colspan="2" id="footIntItems">0</td>
-                                <td colspan="2" id="footCreItems">0</td>
-                                <td id="footTotal">0</td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                    <h3 style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--navy-deep);margin-bottom:14px;">Generated Quiz Items</h3>
-                    <div id="quizArea"></div>
-                </div>
-            </div>
+            <div class="preview-body" id="preview-body"></div>
         </div>
     </div>
 </div>
 
-<!-- Test Config Modal -->
+<!-- ── Test Config Modal ── -->
 <div id="testModal" class="modal" style="display:none;">
     <div class="modal-content">
         <h3>Define Tests</h3>
@@ -408,7 +351,7 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
     </div>
 </div>
 
-<!-- Loading Overlay -->
+<!-- ── Loading Overlay ── -->
 <div id="loadingOverlay">
     <div class="loading-card">
         <div class="spinner-wrap">
@@ -448,7 +391,7 @@ table#tosTable input[type="file"] { width:100%;font-size:12px;padding:6px 8px;bo
     btn.addEventListener('click',function(){applyTheme(html.getAttribute('data-theme')==='dark'?'light':'dark');});
 })();
 
-/* ── Preview logic ── */
+/* ── Preview logic (MutationObserver) ── */
 document.addEventListener('DOMContentLoaded', () => {
     const previewArea=document.getElementById('quiz-preview-area');
     const previewBody=document.getElementById('preview-body');
@@ -462,6 +405,43 @@ document.addEventListener('DOMContentLoaded', () => {
     if(saveBtn){saveBtn.addEventListener('click',()=>{const r=document.querySelector('input[name="redirect_after_save"]');if(r&&r.value)window.location=r.value;else hidePreview();});}
     const obs=new MutationObserver((mutations)=>{for(const m of mutations){if(m.type==='childList'&&previewBody&&previewBody.children.length>0){showPreview();break;}}});
     if(previewBody)obs.observe(previewBody,{childList:true,subtree:false});
+
+    /* ── CILO management ── */
+    const ciloList   = document.getElementById('ciloList');
+    const addCiloBtn = document.getElementById('addCiloBtn');
+
+    function addCiloRow(value='') {
+        const idx  = ciloList.querySelectorAll('.cilo-row').length + 1;
+        const row  = document.createElement('div');
+        row.className = 'cilo-row';
+        row.innerHTML = `
+            <span class="cilo-number">${idx}</span>
+            <textarea class="cilo-input" rows="2"
+                placeholder="e.g. Analyze the fundamental concepts of embedded systems…">${value}</textarea>
+            <button type="button" class="btn secondary remove-cilo">✕</button>
+        `;
+        row.querySelector('.remove-cilo').addEventListener('click', () => {
+            row.remove();
+            renumberCilos();
+        });
+        ciloList.appendChild(row);
+    }
+
+    function renumberCilos() {
+        ciloList.querySelectorAll('.cilo-number').forEach((el, i) => { el.textContent = i + 1; });
+    }
+
+    // Start with one empty CILO row
+    addCiloRow();
+
+    addCiloBtn.addEventListener('click', () => addCiloRow());
+
+    // Expose getCilos for create_tos.js
+    window.getCilos = function() {
+        return Array.from(ciloList.querySelectorAll('.cilo-input'))
+            .map(t => t.value.trim())
+            .filter(v => v.length > 0);
+    };
 });
 </script>
 </body>
