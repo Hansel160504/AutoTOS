@@ -157,12 +157,17 @@ BLOOM_HINTS: Dict[str, str] = {
 # =====================================================
 # INSTRUCTIONS
 # =====================================================
+# =====================================================
+# INSTRUCTIONS
+# =====================================================
 AUTOTOS_INSTRUCTION = (
     "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. Output ONLY this JSON:\n"
     "{\"type\":\"mcq|truefalse|open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
     "\"choices\":[\"A text\",\"B text\",\"C text\",\"D text\"],\"answer\":\"A|B|C|D|true|false\","
     "\"answer_text\":\"Why the answer is correct (1-2 sentences).\"}\n"
-    "choices field: mcq only. answer_text field: mcq and truefalse only. Answer based ONLY on the provided context."
+    "choices field: mcq only. answer_text field: mcq and truefalse only. Answer based ONLY on the provided context.\n"
+    "CRITICAL RULE FOR MCQ: The 'answer' field MUST contain ONLY the single uppercase letter (A, B, C, or D). Do NOT write out the full text of the choice.\n"
+    "CRITICAL RULE: Write direct questions (e.g., 'What is...'). Do NOT generate fill-in-the-blank questions. NEVER use underscores (_____)."
 )
 
 AUTOTOS_INSTRUCTION_OPEN = (
@@ -286,6 +291,9 @@ _gen_progress_lock = threading.Lock()
 # =====================================================
 # UTILITIES
 # =====================================================
+# =====================================================
+# UTILITIES
+# =====================================================
 def clean_text(txt) -> str:
     if txt is None: return ""
     if not isinstance(txt, str):
@@ -302,6 +310,28 @@ _AWKWARD_PHRASING_RULES = [
     (re.compile(r'^Which best describes what\b',                   re.IGNORECASE), "What"),
     (re.compile(r'^Which best describes which\b',                  re.IGNORECASE), "Which"),
 ]
+
+# --- NEW: Fill-in-the-blank Guard ---
+_FILL_IN_BLANK_RE = re.compile(r'_{3,}')
+
+def is_fill_in_the_blank(question: str) -> bool:
+    """Returns True if the question contains 3 or more underscores."""
+    if not question: return False
+    return bool(_FILL_IN_BLANK_RE.search(question))
+
+# --- NEW: MCQ Hallucination Fix ---
+def normalize_mcq_answer(answer_value: str, choices: list) -> str:
+    """Converts hallucinated full-text answers back to A, B, C, or D."""
+    answer_value = answer_value.strip()
+    if len(answer_value) == 1 and answer_value.upper() in ["A", "B", "C", "D"]:
+        return answer_value.upper()
+    
+    answer_lower = answer_value.lower()
+    for i, choice in enumerate(choices):
+        if choice and answer_lower in choice.lower():
+            return chr(65 + i)
+            
+    return answer_value
 
 def _clean_question_phrasing(text: str) -> str:
     if not text: return text
