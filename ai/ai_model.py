@@ -10,51 +10,34 @@
 # v4.12 (MCQ diversity + fallback validation pass)
 #
 #       Fix-49 – Fallback quality gate.
-#                The dataset fallback path (rec.get("output")) previously
-#                bypassed ALL validators. Analysis of the 3,603-record
-#                JSONL showed: 28 term questions, 83 "which statement best",
-#                218 same-first-word choice sets. Q5/Q7/Q13/Q19 in the
-#                failing output were all fallbacks, not model outputs.
-#                `_is_valid_fallback_question()` now screens fallbacks with
-#                the same core checks before appending.
-#
 #       Fix-50 – Same-first-word choice detection.
-#                Added `_choices_have_same_first_word()`. If all 4 choices
-#                start with the same core word (e.g. all "they" / "by" /
-#                "role"), the question is rejected. Root cause: the model
-#                sometimes generates "A role is..." × 4 and the letter-prefix
-#                stripper reveals the shared stem. 218 such cases exist in the
-#                training dataset, which also seeds them into fallbacks.
-#
 #       Fix-51 – MCQ negation in question stem.
-#                "Which of the following is NOT..." is poor test design.
-#                Added `_is_mcq_negation_question()` to reject questions
-#                containing "is not / are not / does not / cannot" in the
-#                MCQ question stem. Also added to instruction FORBIDDEN list
-#                and to the fallback gate.
-#
 #       Fix-52 – "How does" opener — per-concept cap.
-#                After banning "Which statement best" (Fix-45), the model
-#                defaulted to "How does X affect/impact/contribute" for every
-#                Understanding MCQ (Q6, Q8, Q10 in test output — all "How
-#                does"). Fix: cap at 1 "how" opener per concept total. On
-#                cap breach, the retry note explicitly lists alternative
-#                starters. Instruction starters for Understanding now avoid
-#                "How does" entirely.
-#
 #       Fix-53 – MCQ sub-topic saturation via per-concept content-word Jaccard.
-#                Q8 and Q10 were both about "consistency" for UI Basics.
-#                Added `_is_mcq_subtopic_saturated()` with per-concept word
-#                set (Jaccard ≥ 0.50). Content-word filter lowered from
-#                len > 4 to len > 3 so "role/user/data/code" are now tracked.
-#                Also lowered the choices-level Jaccard to the same rule so
-#                that semantically identical choice sets are caught earlier.
-#
 #       Fix-54 – Choices content-word threshold lowered 5 → 4 chars.
-#                Short domain words like "role", "user", "data", "code",
-#                "port" are meaningful; excluding them caused the 218
-#                same-stem choice sets to slip through `_has_semantic_
-#                duplicate_choices`. Threshold now > 3 (i.e., 4+ chars).
+#
+# v4.13 (Pronoun starters + Analyzing bloom relaxation)
+#
+#       Fix-55 – Pronoun starters allowed in same-first-word check.
+#                "it/they/this/these/there/its/he/she/we/our" are no longer
+#                blanket-rejected by _choices_have_same_first_word.
+#                "It reduces X / It prevents Y / It enables Z / It brings Z"
+#                are valid, meaningfully different choices that share only the
+#                subject pronoun. Pairwise Jaccard in
+#                _has_semantic_duplicate_choices handles genuine clones.
+#
+#       Fix-56 – "Which statement best" allowed for Analyzing bloom.
+#                The rejection in _generate_single and _is_valid_fallback_question
+#                now checks bloom before rejecting — Analyzing is exempt.
+#                "Which statement best explains the relationship between X and Y?"
+#                is a valid Analyzing question.
+#
+#       Fix-57 – "What is the main/primary/key difference" accepted for Analyzing.
+#                _BLOOM_MCQ_PATTERNS["Analyzing"] now allows an optional qualifier
+#                word (main|primary|key|core|significant|major|fundamental|
+#                critical|notable) between "the" and the noun group.
+#                "Which statement best" also added to the Analyzing pattern so
+#                _is_valid_mcq_bloom_pattern does not double-reject it.
 # ============================================================
 
 import os
@@ -157,16 +140,7 @@ MAX_TOKENS_SINGLE: Dict[str, int] = {
 }
 
 # =====================================================
-# INSTRUCTIONS  (v4.12)
-#
-# v4.12 changes from v4.11:
-#   • "How does X affect/impact/contribute/influence" added to FORBIDDEN
-#     (Fix-52). After banning "which statement best", the model defaulted
-#     to "how does" for every Understanding MCQ.
-#   • "Which of the following is not" added to FORBIDDEN (Fix-51).
-#   • Understanding starters completely replaced — no "How does" at all
-#     (Fix-52). Now: Why / What happens / In what way / What role.
-#   • Remembering starters clarified to discourage "What is the term for".
+# INSTRUCTIONS  (v4.13)
 # =====================================================
 AUTOTOS_INSTRUCTION = (
     "You are AutoTOS. Output ONLY valid JSON.\n"
@@ -201,7 +175,7 @@ AUTOTOS_INSTRUCTION = (
     "  Remembering  → 'What is the primary purpose of X?' | 'What causes X?' | 'Which [noun] is used for X?' | 'When does X occur?'\n"
     "  Understanding → 'Why is X important for Y?' | 'What happens when X occurs?' | 'In what way does X affect Y?' | 'What role does X play in Y?'\n"
     "  Applying     → 'Given X, which approach should be used?' | 'How would you implement X?' | 'Which solution best addresses X?'\n"
-    "  Analyzing    → 'What is the relationship between X and Y?' | 'What distinguishes X from Y?' | 'What is the main difference between X and Y?'\n"
+    "  Analyzing    → 'What is the relationship between X and Y?' | 'What distinguishes X from Y?' | 'What is the main difference between X and Y?' | 'Which statement best explains the relationship between X and Y?'\n"
     "  Evaluating   → 'Which approach is most effective for X?' | 'What is the main weakness of X?' | 'Assess X; what is its primary limitation?'\n"
     "  Creating     → 'Which design best addresses X?' | 'Select the approach that best achieves Y.' | 'Which plan most effectively combines X and Y?'\n"
 )
@@ -820,14 +794,22 @@ def _choice_has_letter_prefix(text: str) -> bool:
 
 # =====================================================
 # Fix-37 (v4.9): Bloom-level question-starter validator
+# Updated v4.13 (Fix-57): Analyzing pattern now allows optional qualifier
+# words (main/primary/key/etc.) before the noun group, and also accepts
+# "which statement best" as a valid Analyzing opener (Fix-56).
 # =====================================================
 _BLOOM_MCQ_PATTERNS: Dict[str, re.Pattern] = {
     "Analyzing": re.compile(
-        r'^(what (is|are) the (relationship|difference|distinction|cause|root cause|interaction|component|underlying)\b|'
+        # Fix-57: optional qualifier between "the" and the noun group
+        r'^(what (is|are) the '
+        r'(main |primary |key |core |significant |major |fundamental |critical |notable )?'
+        r'(relationship|difference|distinction|cause|root cause|interaction|component|underlying)\b|'
         r'what (causes?|distinguishes?|differentiates?|connects?|contributes?)\b|'
         r'(analyze|compare|contrast|examine|distinguish|differentiate|categorize|dissect|break down|identify)\b|'
         r'which (architectural|component|structural|key|primary|underlying) (feature|difference|factor|element)\b|'
-        r'(analyze|examine) .{3,60}; what (does|is|are)\b)',
+        r'(analyze|examine) .{3,60}; what (does|is|are)\b|'
+        # Fix-56: "which statement best" is a valid Analyzing opener
+        r'which statement (best |most )?(summarizes?|explains?|describes?|illustrates?|represents?|captures?)\b)',
         re.IGNORECASE
     ),
     "Evaluating": re.compile(
@@ -1035,15 +1017,17 @@ def _answer_matches_explanation(answer_letter, choices, answer_text):
 
 # =====================================================
 # Fix-50/54 (v4.12): SAME-FIRST-WORD CHOICE DETECTOR
+# Fix-55 (v4.13):    Pronoun starters are now also exempt.
 #
-# If all 4 choices start with the same core noun/pronoun word, the MCQ
-# is definitionally bad — choices are variants of the same idea.
-# 137 such cases were found in the training JSONL (they/it/role/user…).
+# If all 4 choices start with the same core content word the MCQ is
+# definitionally bad — choices are variants of the same idea.
 #
-# EXCEPTION: prepositions/conjunctions ("by/in/to/with/for/from…") are
-# legitimate starters for How/Why answer options ("By reducing X",
-# "By encrypting Y"). 81 such cases in the dataset are valid and should
-# not be rejected — the Jaccard check handles semantic duplicates there.
+# EXCEPTION 1: prepositions/conjunctions ("by/in/to/with/for/from…") are
+# legitimate starters for How/Why answer options ("By reducing X").
+# EXCEPTION 2: pronouns ("it/they/this/these/there/its…") are legitimate
+# starters for "It reduces X / It prevents Y / It enables Z" style options
+# that differ meaningfully in predicate. The pairwise Jaccard check in
+# _has_semantic_duplicate_choices catches genuine semantic clones.
 # =====================================================
 _PREPOSITION_STARTERS = frozenset({
     "by", "in", "to", "with", "for", "from", "at", "on", "through",
@@ -1051,8 +1035,15 @@ _PREPOSITION_STARTERS = frozenset({
     "during", "because", "although", "since", "as", "that", "upon",
 })
 
+# Fix-55 (v4.13): pronoun starters exempt from same-first-word hard reject.
+_PRONOUN_STARTERS = frozenset({
+    "it", "its", "they", "their", "this", "these", "there",
+    "he", "she", "we", "our",
+})
+
 def _choices_have_same_first_word(choices: list) -> bool:
-    """Return True if all choices share the same leading content word (non-preposition)."""
+    """Return True if all choices share the same leading content word
+    that is neither a preposition/conjunction nor a pronoun."""
     if not choices or len(choices) < 4:
         return False
     first_words = []
@@ -1070,7 +1061,10 @@ def _choices_have_same_first_word(choices: list) -> bool:
     # Allow prepositions/conjunctions — they legitimately start clause fragments
     if first_words[0] in _PREPOSITION_STARTERS:
         return False
-    logger.info("MCQ rejected: all choices start with same noun/pronoun: %r", first_words[0])
+    # Fix-55: allow pronouns — Jaccard check handles semantic dupes
+    if first_words[0] in _PRONOUN_STARTERS:
+        return False
+    logger.info("MCQ rejected: all choices start with same noun: %r", first_words[0])
     return True
 
 
@@ -1095,7 +1089,7 @@ def _has_semantic_duplicate_choices(choices: list) -> bool:
         # Fix-54: threshold lowered to > 3 (4+ chars) to include "role", "user", "data"
         return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 3}
 
-    # Fix-50: same-first-word check
+    # same-first-word check (pronouns now exempt — see Fix-55)
     if _choices_have_same_first_word(choices):
         return True
 
@@ -1180,6 +1174,8 @@ def _is_term_definition_question(question: str) -> bool:
 
 # =====================================================
 # Fix-45 (v4.11): "WHICH STATEMENT BEST" REJECTION
+# Note: the rejection guard in _generate_single and
+# _is_valid_fallback_question exempts bloom == "Analyzing" (Fix-56 v4.13).
 # =====================================================
 _WHICH_STMT_BEST_RE = re.compile(
     r"^which (statement|of the following statements?|option|answer)\s+"
@@ -1195,9 +1191,6 @@ def _is_which_statement_best(question: str) -> bool:
 
 # =====================================================
 # Fix-51 (v4.12): MCQ NEGATION IN QUESTION STEM
-#
-# "Which of the following is NOT..." is poor test design — it tests
-# elimination rather than recall/understanding, and is confusing.
 # =====================================================
 _MCQ_NEGATION_STEM_RE = re.compile(
     r"\b(is not|are not|does not|do not|cannot|can't|doesn't|aren't|isn't|"
@@ -1213,10 +1206,6 @@ def _is_mcq_negation_question(question: str) -> bool:
 
 # =====================================================
 # Fix-52 (v4.12): MCQ "HOW DOES" OPENER — PER-CONCEPT CAP
-#
-# After banning "which statement best" (Fix-45), the model defaulted to
-# "How does X affect/impact/contribute" for every Understanding MCQ.
-# This extracts the opener category and enforces a per-concept cap.
 # =====================================================
 _MCQ_OPENER_CATEGORY_RE = re.compile(
     r"^(how does|how do|how is|how are|how can|how would|how will|how should|how could|"
@@ -1310,11 +1299,6 @@ def _mcq_opener_hint(
 
 # =====================================================
 # Fix-53 (v4.12): MCQ SUB-TOPIC SATURATION
-#
-# Q8 and Q10 were both about "consistency" in UI Basics because the
-# fingerprint didn't catch slightly differently worded questions about
-# the same sub-concept. A per-concept Jaccard check (threshold 0.50)
-# on content words catches this.
 # =====================================================
 _MCQ_SUBTOPIC_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
@@ -1690,16 +1674,7 @@ def _is_valid_tf(q: dict) -> bool:
 
 # =====================================================
 # Fix-49 (v4.12): FALLBACK QUALITY GATE
-#
-# The dataset fallback path (`rec.get("output")`) previously bypassed
-# ALL validators. Analysis showed: 28 term questions, 83 "which statement
-# best", 218 same-first-word choice sets in the 3,603-record JSONL.
-# Q5/Q7/Q13/Q19 in the failing output were all confirmed fallbacks.
-#
-# Strategy: reject the most egregious fallbacks (term-defs, "which
-# statement best", same-word choices, MCQ negation). Accept borderline
-# fallbacks (e.g. slightly repetitive openers) to avoid inflating the
-# [GENERATION FAILED] count unnecessarily.
+# Fix-56 (v4.13): "which statement best" exempt for Analyzing bloom.
 # =====================================================
 def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
     """
@@ -1716,9 +1691,11 @@ def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
         return False
 
     if display_type == "mcq":
-        # Reject "Which statement best..."
-        if _is_which_statement_best(qtext):
-            logger.info("Fallback rejected: which-statement-best: %r", qtext[:70])
+        # Fix-56: "Which statement best" is allowed for Analyzing bloom
+        _fb_bloom = (q.get("bloom") or "").strip()
+        if _is_which_statement_best(qtext) and _fb_bloom not in ("Analyzing",):
+            logger.info("Fallback rejected: which-statement-best (bloom=%s): %r",
+                        _fb_bloom, qtext[:70])
             return False
         # Reject negation in stem
         if _is_mcq_negation_question(qtext):
@@ -1727,7 +1704,7 @@ def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
         choices = q.get("choices") or []
         if len(choices) != 4:
             return False
-        # Reject same-first-word choices
+        # Reject same-first-word choices (pronouns now exempt — Fix-55)
         if _choices_have_same_first_word(choices):
             logger.info("Fallback rejected: same-first-word choices for: %r", qtext[:60])
             return False
@@ -1839,10 +1816,10 @@ def _generate_single(
                 avoid_list = avoid_list[-3:]
                 time.sleep(0.05 * attempt); continue
 
-        # Fix-45: reject "Which statement best..."
-        if _is_which_statement_best(qtext):
-            logger.info("Rejected 'which statement best' record=%d q=%r",
-                        record_idx, qtext[:70])
+        # Fix-45 / Fix-56: reject "Which statement best..." except for Analyzing bloom
+        if _is_which_statement_best(qtext) and bloom not in ("Analyzing",):
+            logger.info("Rejected 'which statement best' record=%d bloom=%s q=%r",
+                        record_idx, bloom, qtext[:70])
             avoid_list.append(qtext[:25])
             avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
@@ -2182,7 +2159,7 @@ def load_jsonl(path):
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(title="AutoTOS AI Service", version="4.12-ollama")
+app = FastAPI(title="AutoTOS AI Service", version="4.13-ollama")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
 
@@ -2202,7 +2179,7 @@ async def health():
             "ollama_model":       OLLAMA_MODEL,
             "chunk_size":         CHUNK_SIZE,
             "generation_workers": GENERATION_WORKERS,
-            "version":            "4.12"}
+            "version":            "4.13"}
 
 @app.get("/cache_stats")
 async def cache_stats():
