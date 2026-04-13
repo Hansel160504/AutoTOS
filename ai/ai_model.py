@@ -1,96 +1,65 @@
 # AutoTOS AI module — Ollama backend
 #
-# Migration from llama-cpp-python → Ollama:
-#   - Removed: Llama, LlamaGrammar, model file loading
-#   - Added:   requests HTTP calls to Ollama /api/generate
-#   - format="json" replaces LlamaGrammar for structured output
-#   - All business logic (chunking, fingerprinting, validators) unchanged
-#
 # ── Patch history ──────────────────────────────────────────────────────────
-# v3.5  Fix 1 – AUTOTOS_INSTRUCTION: added "All choices MUST be unique"
-#       Fix 2 – _TF_HINT: added "Do NOT use negation words"
-#       Fix 3 – MAX_TOKENS_SINGLE[mcq]: 250 → 350
-#       Fix 4 – _is_valid_answer: removed false-positive sentence_choices rule
-#       Fix 5 – _is_valid_tf: added double-negative guard
+# v4.9  – Instruction trim, Bloom pattern relaxation.
+# v4.10 – Qwen3-4B token + negation fixes.
+# v4.11 – Term-def expansion (Fix-44), "which statement best" hard-reject
+#          (Fix-45), TF context-framing rejection (Fix-46), instruction
+#          rewrite for small models (Fix-47), open-ended verb diversity (Fix-48).
 #
-# v3.6  Opt 1 – Token budgets recalibrated from real log data
-#       Opt 2 – num_ctx=768 added to Ollama options
-#       Opt 3 – Parallel generation via ThreadPoolExecutor
-#       Opt 4 – Thread-safe seen_fps and seen_stems
-#       Opt 5 – GENERATION_WORKERS exposed as env var
+# v4.12 (MCQ diversity + fallback validation pass)
 #
-# v3.7  Fix 6 – Answer-based secondary fingerprint
-#       Fix 7 – Semantic-duplicate choice detection via pairwise Jaccard
-#       Fix 8 – AUTOTOS_INSTRUCTION reinforced
-#       Fix 9 – Warm-up replaced with lightweight model-load ping
+#       Fix-49 – Fallback quality gate.
+#       Fix-50 – Same-first-word choice detection.
+#       Fix-51 – MCQ negation in question stem.
+#       Fix-52 – "How does" opener — per-concept cap.
+#       Fix-53 – MCQ sub-topic saturation via per-concept content-word Jaccard.
+#       Fix-54 – Choices content-word threshold lowered 5 → 4 chars.
 #
-# v3.8  Fix 10 – Bloom label rename (dataset v5+)
+# v4.13 (Pronoun starters + Analyzing bloom relaxation)
 #
-# v3.9  Opt 6 – BLOOM_HINTS injected into build_training_prompt (reverted v4.0)
+#       Fix-55 – Pronoun starters allowed in same-first-word check.
+#                "it/they/this/these/there/its/he/she/we/our" are no longer
+#                blanket-rejected by _choices_have_same_first_word.
+#                "It reduces X / It prevents Y / It enables Z / It brings Z"
+#                are valid, meaningfully different choices that share only the
+#                subject pronoun. Pairwise Jaccard in
+#                _has_semantic_duplicate_choices handles genuine clones.
 #
-# v4.0  PROMPT-1 – build_training_prompt() rewritten to match training format.
-#       PROMPT-2 – Verbose injection removed (BLOOM_HINTS, base_rules, type_rules).
-#       PROMPT-3 – _TF_HINT replaced with single inline line for tf type.
-#       PROMPT-4 – avoid_block trimmed from 6 → 3 most-recent questions.
-#       PROMPT-5 – num_ctx raised from 768 → 2048.
-#       PROMPT-6 – BLOOM_HINTS moved to retry path only (attempt >= 3).
+#       Fix-56 – "Which statement best" allowed for Analyzing bloom.
+#                The rejection in _generate_single and _is_valid_fallback_question
+#                now checks bloom before rejecting — Analyzing is exempt.
+#                "Which statement best explains the relationship between X and Y?"
+#                is a valid Analyzing question.
 #
-# v4.1  Fix 11 – _strip_choice_letter_prefix(): strip embedded "A ", "B. ",
-#                "C) " prefixes that the model echoes inside choice text.
-#       Fix 12 – _is_valid_blank_completion(): reject MCQ where stem has blank
-#                but choices are full sentences incompatible with the stem.
-#       Fix 13 – chunk_text() word-boundary guard: never cut mid-token.
-#
-# v4.2  Opt 7  – CHUNK_SIZE: 800 → 1500 chars, CHUNK_OVERLAP: 30 → 60.
-#       Fix 14 – TF semantic-duplicate detection via Jaccard similarity.
-#       Fix 15 – TF answer-balance nudge per concept.
-#       Opt 8  – Open-ended bloom+concept tracker with diversity nudge.
-#
-# v4.3  Opt 9  – In-memory LRU cache (512 slots) layered over disk cache.
-#                Eliminates disk I/O on repeated prompts within a session.
-#                Warm-populates from disk on first hit.
-#       Opt 10 – Per-type num_ctx: mcq/tf=768, open=1024.
-#                MCQ/TF are 67 % of records; reducing their context window
-#                saves ~17 % inference time across a full batch.
-#       Opt 11 – GENERATION_WORKERS default raised 2 → 4.
-#                Doubles throughput on multi-core hosts; still env-overridable.
-#       Opt 12 – Retry sleep halved: 0.05×attempt (was 0.10×attempt).
-#                Saves up to 0.75 s per worst-case question (5 retries).
-#       Opt 13 – seen_stems converted list → collections.deque(maxlen=8).
-#                O(1) append + automatic eviction; eliminates manual pop(0).
-#       Opt 14 – Validation order rebalanced in _generate_single:
-#                fingerprint dedup (O(1) set lookup) now runs BEFORE the
-#                expensive Jaccard / choice-dedup validators, short-circuiting
-#                work on questions that are structural duplicates.
-#       Opt 15 – _tf_content_words memoised via functools.lru_cache(1024).
-#                Avoids re-tokenising the same TF statement on every semantic-
-#                dedup check during multi-attempt retries.
-#       Opt 16 – avoid_list in _generate_single capped to last 3 items at
-#                source (matches the [-3:] slice already inside
-#                _build_avoid_block), reducing list-copy overhead.
-#       Opt 17 – MAX_ATTEMPTS reduced 5 → 4.  Better validation ordering
-#                means failures are caught earlier, so a 4th attempt provides
-#                diminishing returns; one fewer round-trip per hard question.
+#       Fix-57 – "What is the main/primary/key difference" accepted for Analyzing.
+#                _BLOOM_MCQ_PATTERNS["Analyzing"] now allows an optional qualifier
+#                word (main|primary|key|core|significant|major|fundamental|
+#                critical|notable) between "the" and the noun group.
+#                "Which statement best" also added to the Analyzing pattern so
+#                _is_valid_mcq_bloom_pattern does not double-reject it.
 # ============================================================
 
+import os
 import re
 import json
 import fitz
 import base64
-import requests
-from docx import Document
-from pptx import Presentation
-from io import BytesIO
-import time
-import threading
-from collections import OrderedDict, deque          # Opt 9, Opt 13
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from functools import lru_cache                     # Opt 15
-from typing import List, Dict, Any, Optional, Set, Tuple
-import os
 import hashlib
 import logging
 import random
+import tempfile
+import threading
+import time
+from collections import OrderedDict, deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import requests
+from docx import Document
+from pptx import Presentation
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -107,13 +76,13 @@ OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://ollama:11434")
 OLLAMA_MODEL    = os.environ.get("OLLAMA_MODEL", "autotos")
 OLLAMA_TIMEOUT  = int(os.environ.get("OLLAMA_TIMEOUT", "300"))
 
-# Opt 11 (v4.3): raised default from 2 → 4 for better multi-core utilisation.
-GENERATION_WORKERS = int(os.environ.get("GENERATION_WORKERS", "2"))
+GENERATION_WORKERS = int(os.environ.get("GENERATION_WORKERS", "1"))
 
 MAX_RETURN    = 50_000
+CHUNK_SIZE    = 600
+CHUNK_OVERLAP = 20
 
-CHUNK_SIZE    = 1500
-CHUNK_OVERLAP = 60
+CACHE_MAX_FILES = 2_000
 
 BASE_DIR        = os.path.dirname(__file__)
 CACHE_DIR       = os.path.join(BASE_DIR, ".extracted_cache")
@@ -124,19 +93,12 @@ os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 logger.info("Ollama config: base_url=%s model=%s timeout=%ds",
             OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT)
 
+SESSION = requests.Session()
+
 # =====================================================
-# Opt 9 (v4.3) — IN-MEMORY LRU CACHE
+# IN-MEMORY LRU CACHE
 # =====================================================
 class _LRUMemCache:
-    """
-    Thread-safe in-memory LRU cache layered over the disk model cache.
-
-    On a cache miss the disk cache is still consulted; on a disk hit the
-    result is promoted into memory so subsequent calls for the same prompt
-    never touch the filesystem again during the same process lifetime.
-
-    maxsize=512 keeps memory impact small (~512 × avg 300-byte JSON ≈ 150 KB).
-    """
     def __init__(self, maxsize: int = 512) -> None:
         self._cache: OrderedDict = OrderedDict()
         self._maxsize = maxsize
@@ -160,14 +122,11 @@ class _LRUMemCache:
 _mem_cache = _LRUMemCache(maxsize=512)
 
 # =====================================================
-# Opt 10 (v4.3) — PER-TYPE num_ctx
+# PER-TYPE num_ctx
 # =====================================================
-# MCQ/TF outputs are short (<100 tokens); open-ended answers need more space.
-# Using 768 for mcq/tf shaves ~25% off their inference time with no quality
-# impact (context still comfortably fits: ~375-token chunk + ~160 overhead).
 _NUM_CTX: Dict[str, int] = {
-    "mcq":  768,
-    "tf":   768,
+    "mcq":  1024,
+    "tf":   1024,
     "open": 1024,
 }
 
@@ -175,50 +134,44 @@ _NUM_CTX: Dict[str, int] = {
 # TOKEN BUDGETS
 # =====================================================
 MAX_TOKENS_SINGLE: Dict[str, int] = {
-    "mcq":  304,
-    "tf":   256,
-    "open": 256,
+    "mcq":  160,
+    "tf":    85,
+    "open":  90,
 }
 
-# =====================================================
-# BLOOM KEYWORDS
-# =====================================================
-BLOOM_KEYWORDS: Dict[str, List[str]] = {
-    "Remembering":   ["Define", "Identify", "Describe", "Recognize", "Explain", "Recite", "Illustrate"],
-    "Understanding": ["Summarize", "Interpret", "Classify", "Compare", "Contrast", "Infer", "Paraphrase"],
-    "Applying":      ["Solve", "Use", "Complete", "Relate", "Transfer", "Articulate", "Discover"],
-    "Analyzing":     ["Contrast", "Connect", "Devise", "Correlate", "Distill", "Conclude", "Categorize"],
-    "Evaluating":    ["Criticize", "Judge", "Defend", "Appraise", "Prioritize", "Reframe", "Grade"],
-    "Creating":      ["Design", "Develop", "Modify", "Invent", "Write", "Rewrite", "Collaborate"],
-}
-
-# PROMPT-6: BLOOM_HINTS retained but only injected on retry attempt >= 3
-BLOOM_HINTS: Dict[str, str] = {
-    "Remembering":   "Recall a specific fact, term, or definition from the context.",
-    "Understanding": "Explain the main idea or the reason something works the way it does.",
-    "Applying":      "Show how to use the concept in a concrete scenario or task.",
-    "Analyzing":     "Identify a relationship, cause, difference, or underlying pattern.",
-    "Evaluating":    "Judge which option is better, or justify a choice with evidence.",
-    "Creating":      "Propose, design, or plan something new using the concept.",
-}
-
-# =====================================================
-# INSTRUCTIONS
+## =====================================================
+# INSTRUCTIONS  (v4.14)
 # =====================================================
 AUTOTOS_INSTRUCTION = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. Output ONLY this JSON:\n"
-    "{\"type\":\"mcq|truefalse|open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
-    "\"choices\":[\"A text\",\"B text\",\"C text\",\"D text\"],\"answer\":\"A|B|C|D|true|false\","
-    "\"answer_text\":\"Why the answer is correct (1-2 sentences).\"}\n"
-    "choices field: mcq only. answer_text field: mcq and truefalse only. Answer based ONLY on the provided context.\n"
-    "CRITICAL RULE FOR MCQ: The 'answer' field MUST contain ONLY the single uppercase letter (A, B, C, or D). Do NOT write out the full text of the choice.\n"
-    "CRITICAL RULE: Write direct questions (e.g., 'What is...')."
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions ('What is the term', 'What does').\n"
+    "- NO 'How' questions ('How does', 'How will').\n"
+    "- NO meta-phrases like 'In the context of...' or 'Assuming that...'.\n"
+    "- NO negative words in True/False statements ('not', 'never', 'can't').\n"
+    "- MCQ choices must begin with different words. DO NOT include A/B/C/D prefixes in the choice text.\n\n"
+    "BLOOM'S LEVEL STARTERS:\n"
+    "- Remember/Understand: 'What is the primary purpose of...', 'Why is X important for...', 'Which statement best describes...'\n"
+    "- Apply/Analyze: 'Given X, which approach...', 'What distinguishes X from...', 'Which statement best explains...'\n"
+    "- Evaluate/Create: 'Which approach is most effective for...', 'Which design best...'\n\n"
+    "MCQ JSON FORMAT:\n"
+    "{\"type\":\"mcq\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"choices\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":\"A|B|C|D\",\"answer_text\":\"Exactly 1 sentence why correct.\"}\n\n"
+    "TF JSON FORMAT:\n"
+    "{\"type\":\"truefalse\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"true|false\",\"answer_text\":\"Exactly 1 sentence why correct.\"}"
 )
 
 AUTOTOS_INSTRUCTION_OPEN = (
-    "You are AutoTOS. Generate one exam question aligned with the Bloom's level and concept. Output ONLY this JSON:\n"
-    "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"<complete specific answer>\"}\n"
-    "Do NOT include answer_text or choices. Answer must be a complete specific response. Answer based ONLY on the provided context."
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions ('What is the term', 'What does ... mean').\n"
+    "- The 'answer' string MUST be exactly 1 complete sentence ending in a period.\n\n"
+    "BLOOM'S LEVEL STARTERS (Higher-Order Only):\n"
+    "- Apply: 'Apply X to show...', 'Solve...'\n"
+    "- Analyze: 'Analyze...', 'Examine the relationship between...'\n"
+    "- Evaluate: 'Assess...', 'Judge the effectiveness of...'\n"
+    "- Create: 'Design...', 'Propose a plan for...'\n\n"
+    "OPEN-ENDED JSON FORMAT:\n"
+    "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"<Exactly 1 complete sentence.>\"}"
 )
 
 TYPE_MAP = {
@@ -268,7 +221,7 @@ _ollama_ready = False
 def _check_ollama() -> bool:
     global _ollama_ready
     try:
-        r = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10)
+        r = SESSION.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10)
         if r.ok:
             models = [m.get("name", "") for m in r.json().get("models", [])]
             available = any(
@@ -300,8 +253,9 @@ def _sha256_bytes(b: bytes) -> str:
 def _cache_path_for_hash(h: str) -> str:
     return os.path.join(CACHE_DIR, f"{h}.txt")
 
-def _prompt_hash_key(prompt: str, max_tokens: int, temperature: float) -> str:
-    key = f"{OLLAMA_MODEL}|{max_tokens}:{temperature:.4f}:{prompt}"
+def _prompt_hash_key(prompt: str, max_tokens: int,
+                     temperature: float, num_ctx: int) -> str:
+    key = f"{OLLAMA_MODEL}|{max_tokens}|{temperature:.4f}|{num_ctx}|{prompt}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 def _model_cache_path(key: str) -> str:
@@ -317,12 +271,49 @@ def read_model_cache(key: str) -> Optional[Any]:
             except Exception: pass
     return None
 
-def write_model_cache(key: str, obj: Any):
+_cache_write_count = 0
+_CLEANUP_EVERY = 50
+
+def write_model_cache(key: str, obj: Any) -> None:
+    global _cache_write_count
+    target = _model_cache_path(key)
     try:
-        with open(_model_cache_path(key), "w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False)
-    except Exception:
-        pass
+        fd, tmp_path = tempfile.mkstemp(dir=MODEL_CACHE_DIR, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False)
+            os.replace(tmp_path, target)
+        except Exception:
+            try: os.remove(tmp_path)
+            except Exception: pass
+            raise
+    except Exception as e:
+        logger.debug("write_model_cache failed: %s", e)
+        return
+    _cache_write_count += 1
+    if _cache_write_count % _CLEANUP_EVERY == 0:
+        _cleanup_model_cache()
+
+def _cleanup_model_cache(max_files: int = CACHE_MAX_FILES) -> None:
+    try:
+        all_files = [
+            os.path.join(MODEL_CACHE_DIR, f)
+            for f in os.listdir(MODEL_CACHE_DIR)
+            if f.endswith(".json")
+        ]
+        if len(all_files) <= max_files:
+            return
+        all_files.sort(key=lambda p: os.path.getmtime(p))
+        to_delete = all_files[:len(all_files) - max_files]
+        for path in to_delete:
+            try: os.remove(path)
+            except Exception: pass
+        logger.info("Cache cleanup: removed %d old entries (%d remain).",
+                    len(to_delete), max_files)
+    except Exception as e:
+        logger.warning("Cache cleanup failed (non-fatal): %s", e)
+
+_cleanup_model_cache()
 
 CACHE_HITS   = 0
 CACHE_MISSES = 0
@@ -360,7 +351,6 @@ def is_fill_in_the_blank(question: str) -> bool:
     return bool(_FILL_IN_BLANK_RE.search(question))
 
 def normalize_mcq_answer(answer_value: str, choices: list) -> str:
-    """Converts hallucinated full-text answers back to A, B, C, or D."""
     answer_value = answer_value.strip()
     if len(answer_value) == 1 and answer_value.upper() in ["A", "B", "C", "D"]:
         return answer_value.upper()
@@ -392,7 +382,7 @@ def strip_question_prefix(text: str, is_open_ended: bool = False) -> str:
     if text: text = text[0].upper() + text[1:]
     return _clean_question_phrasing(text)
 
-_ANSWER_TEXT_MAX_CHARS = 250
+_ANSWER_TEXT_MAX_CHARS = 220
 
 def _truncate_answer_text(text: str) -> str:
     if not text: return ""
@@ -408,6 +398,19 @@ def _truncate_answer_text(text: str) -> str:
         return truncated.rstrip('.,;:') + "..."
     return first
 
+def _truncate_open_answer(text: str) -> str:
+    if not text: return ""
+    t = re.sub(r"\s+", " ", text).strip()
+    t = re.sub(r'^(answer\s*[:\-]\s*)', '', t, flags=re.IGNORECASE).strip()
+    if not t: return ""
+    _ABR_RE = re.compile(r'\b(e\.g|i\.e|etc|vs|Mr|Mrs|Dr|Prof|Sr|Jr|St|approx|fig|no)\.\s', re.IGNORECASE)
+    masked = _ABR_RE.sub(lambda m: m.group(0).replace('.', '\x00'), t)
+    parts = re.split(r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$', masked)
+    first = parts[0].replace('\x00', '.').strip() if parts else t.strip()
+    if first and first[-1] not in ".!?":
+        first = first + "."
+    return first
+
 # =====================================================
 # CHUNKING
 # =====================================================
@@ -415,10 +418,6 @@ _chunk_cache: Dict[str, List[str]] = {}
 
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
                overlap: int = CHUNK_OVERLAP) -> List[str]:
-    """
-    Split text into overlapping chunks, snapping to sentence boundaries
-    when possible, or word boundaries otherwise (Fix 13, v4.1).
-    """
     if not text: return []
     text = text.strip(); chunks = []; start = 0
     step = max(1, chunk_size - overlap)
@@ -451,10 +450,11 @@ def _find_best_chunk_idx(chunks: List[str], topic: str) -> int:
     return 0
 
 def get_chunks_for_text(full_text: str) -> List[str]:
-    key = hashlib.md5(full_text[:256].encode("utf-8", errors="ignore")).hexdigest()
+    key = hashlib.md5(full_text[:4096].encode("utf-8", errors="ignore")).hexdigest()
     if key not in _chunk_cache:
         _chunk_cache[key] = chunk_text(full_text)
-        logger.info("Chunked document: %d chars -> %d chunks", len(full_text), len(_chunk_cache[key]))
+        logger.info("Chunked document: %d chars -> %d chunks",
+                    len(full_text), len(_chunk_cache[key]))
     return _chunk_cache[key]
 
 # =====================================================
@@ -531,13 +531,13 @@ def lesson_from_upload(data_or_text: Optional[str]) -> str:
     except Exception: return ""
 
 # =====================================================
-# PROMPT BUILDER  (v4.0 — minimal, training-aligned)
+# PROMPT BUILDER
 # =====================================================
 def _build_avoid_block(seen_questions: List[str]) -> str:
     if not seen_questions: return ""
     recent = seen_questions[-3:]
-    items  = "; ".join(f'"{q[:40]}"' for q in recent)
-    return f"\n[Different topic angle — avoid repeating: {items}]\n"
+    items  = "; ".join(f'"{q[:25]}"' for q in recent)
+    return f"\n[Avoid repeating: {items}]\n"
 
 
 def build_training_prompt(
@@ -555,16 +555,15 @@ def build_training_prompt(
 
     tf_note = ""
     if qtype == "tf":
-        tf_note = "\n- Type note: Declarative statement only. No question mark. No negation words.\n"
-
-    bloom_note = ""
-    if attempt >= 3:
-        hint = BLOOM_HINTS.get(bloom, "")
-        if hint:
-            bloom_note = f"\n- Bloom hint: {hint}\n"
+        tf_note = (
+            "\nTF RULES: Write a POSITIVE declarative statement (no question mark).\n"
+            "FORBIDDEN WORDS in statement: not, never, don't, doesn't, isn't, aren't, cannot, can't, won't, no\n"
+            "FORBIDDEN statement starts: 'In the context of', 'In a scenario where', 'Given that', "
+            "'The term ... refers to', 'X is defined as'\n"
+        )
 
     retry_line = f"\n{attempt_note.strip()}\n" if attempt_note and attempt_note.strip() else ""
-    ctx_suffix = f"{tf_note}{bloom_note}{retry_line}{avoid_block}"
+    ctx_suffix = f"{tf_note}{retry_line}{avoid_block}"
 
     user_msg = (
         "### Target Specification:\n"
@@ -619,26 +618,24 @@ def _try_parse_json(json_str: str) -> Optional[Any]:
 # =====================================================
 def ask_model(prompt: str, max_tokens: int = 200,
               temperature: float = 0.45,
-              num_ctx: int = 1024) -> Optional[dict]:   # Opt 10 (v4.3): num_ctx param
+              num_ctx: int = 1024) -> Optional[dict]:
     global CACHE_HITS, CACHE_MISSES
     if not _ollama_ready and not _check_ollama():
         logger.error("Ollama not ready.")
         return None
 
     prompt    = sanitize_prompt(prompt)
-    cache_key = _prompt_hash_key(prompt, max_tokens, temperature)
+    cache_key = _prompt_hash_key(prompt, max_tokens, temperature, num_ctx)
 
-    # Opt 9 (v4.3): check in-memory LRU first (no disk I/O)
     mem_hit = _mem_cache.get(cache_key)
     if mem_hit is not None:
         CACHE_HITS += 1
         return mem_hit if isinstance(mem_hit, dict) else None
 
-    # Fall through to disk cache
     cached = read_model_cache(cache_key)
     if cached is not None:
         CACHE_HITS += 1
-        _mem_cache.set(cache_key, cached)   # Opt 9: warm the mem cache
+        _mem_cache.set(cache_key, cached)
         return cached if isinstance(cached, dict) else None
     CACHE_MISSES += 1
 
@@ -650,15 +647,16 @@ def ask_model(prompt: str, max_tokens: int = 200,
         "options": {
             "temperature": temperature,
             "num_predict": max_tokens,
-            "num_ctx":     num_ctx,   # Opt 10 (v4.3): per-type context window
+            "num_ctx":     num_ctx,
             "top_p":       0.95,
+            "think":       False,
             "stop":        ["<|im_start|>", "<|im_end|>", "<|endoftext|>"],
         },
     }
 
     try:
         start = time.time()
-        resp  = requests.post(
+        resp  = SESSION.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json=payload,
             timeout=OLLAMA_TIMEOUT,
@@ -687,7 +685,6 @@ def ask_model(prompt: str, max_tokens: int = 200,
             logger.warning("No JSON found in: %s", raw[:200])
             return None
 
-        # Opt 9 (v4.3): write to both disk and mem cache
         write_model_cache(cache_key, parsed)
         _mem_cache.set(cache_key, parsed)
         return parsed
@@ -704,13 +701,13 @@ def ask_model(prompt: str, max_tokens: int = 200,
 # =====================================================
 def _warmup_model() -> None:
     try:
-        resp = requests.post(
+        resp = SESSION.post(
             f"{OLLAMA_BASE_URL}/api/generate",
             json={
                 "model":  OLLAMA_MODEL,
                 "prompt": "Say OK",
                 "stream": False,
-                "options": {"num_predict": 3, "temperature": 0.0},
+                "options": {"num_predict": 3, "temperature": 0.0, "num_ctx": 1024},
             },
             timeout=OLLAMA_TIMEOUT,
         )
@@ -747,13 +744,77 @@ def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 # =====================================================
-# Fix 11 (v4.1) — CHOICE PREFIX STRIPPER
+# CHOICE PREFIX STRIPPER
 # =====================================================
-_CHOICE_LETTER_PREFIX_RE = re.compile(r'^[A-Da-d][).:\s]+\s*')
+_CHOICE_LETTER_PREFIX_RE = re.compile(
+    r'^(?:\([A-Da-d]\)|[A-Da-d][).:\-]\s*|[A-Da-d]\s+(?=[A-Z]))'
+)
 
 def _strip_choice_letter_prefix(text: str) -> str:
-    """Remove leading 'A ', 'B. ', 'C) ' style prefixes from a choice string."""
-    return _CHOICE_LETTER_PREFIX_RE.sub("", text).strip()
+    if not text:
+        return text
+    stripped = _CHOICE_LETTER_PREFIX_RE.sub("", text).strip()
+    if stripped == text and len(text) > 2 and text[0].upper() in "ABCD" and text[1] == " ":
+        stripped = text[2:].strip()
+    return stripped
+
+
+def _choice_has_letter_prefix(text: str) -> bool:
+    if not text or len(text) < 2:
+        return False
+    return bool(_CHOICE_LETTER_PREFIX_RE.match(text))
+
+
+# =====================================================
+# Fix-37 (v4.9): Bloom-level question-starter validator
+# Updated v4.13 (Fix-57): Analyzing pattern now allows optional qualifier
+# words (main/primary/key/etc.) before the noun group, and also accepts
+# "which statement best" as a valid Analyzing opener (Fix-56).
+# =====================================================
+_BLOOM_MCQ_PATTERNS: Dict[str, re.Pattern] = {
+    "Analyzing": re.compile(
+        # Fix-57: optional qualifier between "the" and the noun group
+        r'^(what (is|are) the '
+        r'(main |primary |key |core |significant |major |fundamental |critical |notable )?'
+        r'(relationship|difference|distinction|cause|root cause|interaction|component|underlying)\b|'
+        r'what (causes?|distinguishes?|differentiates?|connects?|contributes?)\b|'
+        r'(analyze|compare|contrast|examine|distinguish|differentiate|categorize|dissect|break down|identify)\b|'
+        r'which (architectural|component|structural|key|primary|underlying) (feature|difference|factor|element)\b|'
+        r'(analyze|examine) .{3,60}; what (does|is|are)\b|'
+        # Fix-56: "which statement best" is a valid Analyzing opener
+        r'which statement (best |most )?(summarizes?|explains?|describes?|illustrates?|represents?|captures?)\b)',
+        re.IGNORECASE
+    ),
+    "Evaluating": re.compile(
+        r'^(which (approach|method|system|strategy|solution|framework|tool|option|argument|choice|design) '
+        r'(is most|would be most|best|most effectively|is the most|is recommended|provides the strongest)\b|'
+        r'what is the (strongest|most critical|weakest|most significant|most effective)\b|'
+        r'(assess|evaluate|judge|defend|appraise|prioritize|grade|critique|rate|justify|recommend|value)\b|'
+        r'assess .{3,60}; what (is|are)\b|'
+        r'judge (the|whether)\b|'
+        r'which .{5,60} (most effective|most reliable|most compliant|best suited|most appropriate)\b)',
+        re.IGNORECASE
+    ),
+    "Creating": re.compile(
+        r'^(which (of the following|design|approach|configuration|method|plan|outline|schema|strategy|combination|'
+        r'blueprint|structure|pattern|formulation) (represents?|best (designs?|structures?|synthesizes?|invents?|'
+        r'constructs?|formulates?|outlines?|proposes?|organizes?|creates?|builds?|establishes?)|'
+        r'most (optimized|innovative|effective|novel))\b|'
+        r'(design|develop|modify|invent|write|rewrite|collaborate|construct|formulate|compose|plan|propose|'
+        r'produce|generate|choose|select|create|build)\b|'
+        r'choose the .{3,60} that best\b|'
+        r'select the .{3,60} that (best|most)\b)',
+        re.IGNORECASE
+    ),
+}
+
+def _is_valid_mcq_bloom_pattern(question: str, bloom: str) -> bool:
+    if not question or len(question) < 10:
+        return True
+    pattern = _BLOOM_MCQ_PATTERNS.get(bloom)
+    if pattern is None:
+        return True
+    return bool(pattern.match(question))
 
 
 def normalize_generated_question(q: dict, expected_display_type: str,
@@ -777,6 +838,7 @@ def normalize_generated_question(q: dict, expected_display_type: str,
     if display_type != "open_ended":
         raw_answer_text = clean_text(q.get("answer_text") or q.get("explanation") or "")
         out["answer_text"] = _truncate_answer_text(raw_answer_text)
+
     choices_raw = q.get("choices") or q.get("options")
     if isinstance(choices_raw, dict):
         keys = sorted(choices_raw.keys(), key=lambda s: s.upper())
@@ -787,6 +849,7 @@ def normalize_generated_question(q: dict, expected_display_type: str,
         out["choices"] = [
             _strip_choice_letter_prefix(clean_text(x)) for x in choices_raw
         ][:4]
+
     ans = q.get("answer", "")
     if isinstance(ans, bool): out["answer"] = "true" if ans else "false"
     elif isinstance(ans, (int, float)):
@@ -815,8 +878,20 @@ def normalize_generated_question(q: dict, expected_display_type: str,
             elif a_lower in ("1", "yes"):     out["answer"] = "true"
             elif a_lower in ("0", "no"):      out["answer"] = "false"
             else:                             out["answer"] = a
-        else: out["answer"] = a
-    else: out["answer"] = clean_text(str(ans or ""))
+        elif display_type == "open_ended":
+            out["answer"] = _truncate_open_answer(clean_text(a))
+        else:
+            out["answer"] = a
+    else:
+        raw_ans = clean_text(str(ans or ""))
+        if display_type == "open_ended":
+            out["answer"] = _truncate_open_answer(raw_ans)
+        else:
+            out["answer"] = raw_ans
+
+    if display_type == "open_ended" and out["answer"]:
+        out["answer"] = _truncate_open_answer(out["answer"])
+
     return out
 
 # =====================================================
@@ -826,9 +901,10 @@ _FP_STOPWORDS = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
     r'that|this|these|those|with|as|from|into|about|which|how|what|does|do)\b')
 _FP_FILLER_RE = re.compile(
-    r"^(what (is|are|does|do|was|were) (the )?(primary |main |key )?"
+    r"^(what (is|are|does|do) (the )?(primary |main |key )?"
     r"(focus|purpose|function|role|goal|aim|definition|meaning|concept|"
     r"example|reason|impact|effect|difference|advantage|use|importance) of\s*|"
+    r"what does (the term|the word|the phrase|the concept)\s+.{0,40}(refer|mean|stand for|describe)\s*(to\s*)?\b|"
     r"which (of the following )?(best )?(describes?|defines?|explains?|is|are)\s*|"
     r"how (does?|do|is|are|can)\s*|"
     r"why (is|are|does|do)\s*)", re.IGNORECASE)
@@ -907,14 +983,71 @@ def _answer_matches_explanation(answer_letter, choices, answer_text):
     best_score, best_idx = scores[0]
     chosen_score = next(s for s, i in scores if i == idx)
     best_letter = chr(ord("A") + best_idx)
-    if best_letter != answer_letter and (best_score - chosen_score) >= 2:
+    if best_letter != answer_letter and (best_score - chosen_score) >= 3:
         return False, best_letter
     return True, answer_letter
 
+
+# =====================================================
+# Fix-50/54 (v4.12): SAME-FIRST-WORD CHOICE DETECTOR
+# Fix-55 (v4.13):    Pronoun starters are now also exempt.
+#
+# If all 4 choices start with the same core content word the MCQ is
+# definitionally bad — choices are variants of the same idea.
+#
+# EXCEPTION 1: prepositions/conjunctions ("by/in/to/with/for/from…") are
+# legitimate starters for How/Why answer options ("By reducing X").
+# EXCEPTION 2: pronouns ("it/they/this/these/there/its…") are legitimate
+# starters for "It reduces X / It prevents Y / It enables Z" style options
+# that differ meaningfully in predicate. The pairwise Jaccard check in
+# _has_semantic_duplicate_choices catches genuine semantic clones.
+# =====================================================
+_PREPOSITION_STARTERS = frozenset({
+    "by", "in", "to", "with", "for", "from", "at", "on", "through",
+    "via", "using", "when", "if", "while", "after", "before",
+    "during", "because", "although", "since", "as", "that", "upon",
+})
+
+# Fix-55 (v4.13): pronoun starters exempt from same-first-word hard reject.
+_PRONOUN_STARTERS = frozenset({
+    "it", "its", "they", "their", "this", "these", "there",
+    "he", "she", "we", "our",
+})
+
+def _choices_have_same_first_word(choices: list) -> bool:
+    """Return True if all choices share the same leading content word
+    that is neither a preposition/conjunction nor a pronoun."""
+    if not choices or len(choices) < 4:
+        return False
+    first_words = []
+    for c in choices:
+        words = (c or "").lower().split()
+        if not words:
+            return False
+        fw = words[0]
+        # Skip leading articles
+        if fw in ("a", "an", "the") and len(words) > 1:
+            fw = words[1]
+        first_words.append(fw)
+    if len(set(first_words)) != 1 or not first_words[0]:
+        return False
+    # Allow prepositions/conjunctions — they legitimately start clause fragments
+    if first_words[0] in _PREPOSITION_STARTERS:
+        return False
+    # Fix-55: allow pronouns — Jaccard check handles semantic dupes
+    if first_words[0] in _PRONOUN_STARTERS:
+        return False
+    logger.info("MCQ rejected: all choices start with same noun: %r", first_words[0])
+    return True
+
+
+# =====================================================
+# Fix-54 (v4.12): SEMANTIC DUPLICATE CHOICES
+# Content-word threshold lowered from > 4 to > 3 chars.
+# =====================================================
 _SEM_DUP_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
-    r'that|this|these|those|with|as|from|into|about|which|how|what|does|do|'
-    r'not|can|will|may|has|have|had|been|being|they|their|such|each|used|'
+    r'that|this|these|those|with|as|from|they|their|such|each|used|'
     r'using|allows|allow|makes|make|uses|use|helps|help|enables|enable|'
     r'provides|provide|requires|require|ensures|ensure|offer|offers)\b',
     re.IGNORECASE
@@ -926,7 +1059,12 @@ def _has_semantic_duplicate_choices(choices: list) -> bool:
 
     def _content(text: str) -> set:
         t = _SEM_DUP_SW.sub(" ", text.lower())
-        return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 4}
+        # Fix-54: threshold lowered to > 3 (4+ chars) to include "role", "user", "data"
+        return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 3}
+
+    # same-first-word check (pronouns now exempt — see Fix-55)
+    if _choices_have_same_first_word(choices):
+        return True
 
     word_sets = [_content(c) for c in choices]
     non_empty = [ws for ws in word_sets if ws]
@@ -956,7 +1094,7 @@ def _has_semantic_duplicate_choices(choices: list) -> bool:
     return False
 
 # =====================================================
-# Fix 12 (v4.1) — BLANK-COMPLETION VALIDATOR
+# BLANK-COMPLETION VALIDATOR
 # =====================================================
 _BLANK_STEM_RE = re.compile(r"_{4,}|\.{3,}\s*$")
 _FULL_SENTENCE_OPENER_RE = re.compile(
@@ -990,7 +1128,222 @@ def _is_valid_blank_completion(q: dict) -> bool:
     return True
 
 # =====================================================
-# Fix 14 (v4.2) — TF SEMANTIC DUPLICATE DETECTION
+# Fix-44 (v4.11) + Fix-49 (v4.12): TERM-DEFINITION REJECTION
+# =====================================================
+_TERM_DEF_QUESTION_RE = re.compile(
+    r"^("
+    r"what does (the term|the word|the phrase|the concept)\s*.{1,50}(refer to|mean|stand for|primarily refer|represent)\b|"
+    r"what is (the term|a term) (used to|for|that)\b|"
+    r"what (is|are) (the term|the definition of|the meaning of)\s|"
+    r"which term (describes?|refers? to|identifies?|defines?|is used|best describes?|best refers?)\b|"
+    r"what term (describes?|refers? to|identifies?|is used)\b"
+    r")",
+    re.IGNORECASE
+)
+
+def _is_term_definition_question(question: str) -> bool:
+    return bool(_TERM_DEF_QUESTION_RE.match(question or ""))
+
+
+# =====================================================
+# Fix-45 (v4.11): "WHICH STATEMENT BEST" REJECTION
+# Note: the rejection guard in _generate_single and
+# _is_valid_fallback_question exempts bloom == "Analyzing" (Fix-56 v4.13).
+# =====================================================
+_WHICH_STMT_BEST_RE = re.compile(
+    r"^which (statement|of the following statements?|option|answer)\s+"
+    r"(best |most )?"
+    r"(summarizes?|explains?|describes?|illustrates?|represents?|captures?|"
+    r"details?|outlines?|reflects?|shows?|demonstrates?|conveys?)",
+    re.IGNORECASE
+)
+
+def _is_which_statement_best(question: str) -> bool:
+    return bool(_WHICH_STMT_BEST_RE.match(question or ""))
+
+
+# =====================================================
+# Fix-51 (v4.12): MCQ NEGATION IN QUESTION STEM
+# =====================================================
+_MCQ_NEGATION_STEM_RE = re.compile(
+    r"\b(is not|are not|does not|do not|cannot|can't|doesn't|aren't|isn't|"
+    r"which is not|which are not|which does not|which cannot|"
+    r"that is not|that are not|not a recognized|not considered|not an example)\b",
+    re.IGNORECASE
+)
+
+def _is_mcq_negation_question(question: str) -> bool:
+    """Reject MCQ questions containing negation in the question stem."""
+    return bool(_MCQ_NEGATION_STEM_RE.search(question or ""))
+
+
+# =====================================================
+# Fix-52 (v4.12): MCQ "HOW DOES" OPENER — PER-CONCEPT CAP
+# =====================================================
+_MCQ_OPENER_CATEGORY_RE = re.compile(
+    r"^(how does|how do|how is|how are|how can|how would|how will|how should|how could|"
+    r"which of the following|"
+    r"what is|what are|what was|"
+    r"why is|why are|why does|why do|"
+    r"what happens|"
+    r"in what way|"
+    r"what role|"
+    r"what makes|"
+    r"when does|when is|"
+    r"where is|where are)",
+    re.IGNORECASE
+)
+
+# Openers that trigger the per-concept cap (max 1 per concept)
+_MCQ_CAPPED_OPENERS = {"how", "which_of"}
+
+def _extract_mcq_opener(question: str) -> str:
+    """Extract a normalized opener category from an MCQ question."""
+    q = (question or "").strip().lower()
+    m = _MCQ_OPENER_CATEGORY_RE.match(q)
+    if not m:
+        return "other"
+    raw = m.group(1).lower()
+    if raw.startswith("how"):
+        return "how"
+    if raw.startswith("which of"):
+        return "which_of"
+    if raw.startswith("what is") or raw.startswith("what are") or raw.startswith("what was"):
+        return "what_is"
+    if raw.startswith("why"):
+        return "why"
+    if raw.startswith("what happens"):
+        return "what_happens"
+    if raw.startswith("in what"):
+        return "in_what_way"
+    if raw.startswith("what role"):
+        return "what_role"
+    if raw.startswith("what makes"):
+        return "what_makes"
+    return "other"
+
+def _is_mcq_opener_overused(
+    candidate_q: dict,
+    seen_mcq_openers: Dict[str, Dict[str, int]],
+    mcq_opener_lock: threading.Lock,
+) -> bool:
+    """Return True if this opener has reached its per-concept cap."""
+    concept = (candidate_q.get("concept") or "").lower().strip()
+    opener  = _extract_mcq_opener(candidate_q.get("question") or "")
+    if opener not in _MCQ_CAPPED_OPENERS:
+        return False
+    limit = 1  # max 1 of each capped opener per concept
+    with mcq_opener_lock:
+        counts = seen_mcq_openers.get(concept, {})
+        return counts.get(opener, 0) >= limit
+
+def _register_mcq_opener(
+    candidate_q: dict,
+    seen_mcq_openers: Dict[str, Dict[str, int]],
+    mcq_opener_lock: threading.Lock,
+) -> None:
+    concept = (candidate_q.get("concept") or "").lower().strip()
+    opener  = _extract_mcq_opener(candidate_q.get("question") or "")
+    with mcq_opener_lock:
+        if concept not in seen_mcq_openers:
+            seen_mcq_openers[concept] = {}
+        seen_mcq_openers[concept][opener] = seen_mcq_openers[concept].get(opener, 0) + 1
+
+def _mcq_opener_hint(
+    concept: str,
+    seen_mcq_openers: Dict[str, Dict[str, int]],
+    mcq_opener_lock: threading.Lock,
+) -> str:
+    """Return an attempt-note hint if capped openers are saturated for this concept."""
+    with mcq_opener_lock:
+        counts = seen_mcq_openers.get(concept.lower().strip(), {})
+    notes = []
+    if counts.get("how", 0) >= 1:
+        notes.append(
+            "Do NOT start with 'How does'. Use instead: "
+            "'Why is X important?', 'What happens when X?', 'What role does X play?', 'In what way does X affect Y?'"
+        )
+    if counts.get("which_of", 0) >= 1:
+        notes.append(
+            "Do NOT start with 'Which of the following'. Ask a specific question instead."
+        )
+    return " ".join(notes)
+
+
+# =====================================================
+# Fix-53 (v4.12): MCQ SUB-TOPIC SATURATION
+# =====================================================
+_MCQ_SUBTOPIC_SW = re.compile(
+    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
+    r'that|this|these|those|with|as|from|how|what|which|when|where|why|'
+    r'does|do|can|will|may|has|have|been|being|they|their|such|each|used|'
+    r'primarily|mainly|often|generally|usually|typically|between|among|'
+    r'following|correctly|commonly|specifically|properly|typically|'
+    r'given|provide|ensure|allow|make|help|support|affect|impact|cause)\b',
+    re.IGNORECASE
+)
+
+def _mcq_subtopic_words(question: str) -> frozenset:
+    q = re.sub(r"[^\w\s]", " ", question.lower())
+    q = _MCQ_SUBTOPIC_SW.sub(" ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    # threshold: 4+ chars (includes "role", "user", "data")
+    return frozenset(w for w in q.split() if len(w) >= 4)
+
+def _is_mcq_subtopic_saturated(
+    candidate_q: dict,
+    seen_mcq_by_concept: Dict[str, List[frozenset]],
+    mcq_concept_lock: threading.Lock,
+    threshold: float = 0.50,
+) -> bool:
+    concept  = (candidate_q.get("concept") or "").lower().strip()
+    question = candidate_q.get("question") or ""
+    cwords   = _mcq_subtopic_words(question)
+    if not cwords:
+        return False
+    with mcq_concept_lock:
+        existing = seen_mcq_by_concept.get(concept, [])
+        for ex_words in existing:
+            if not ex_words:
+                continue
+            union   = cwords | ex_words
+            jaccard = len(cwords & ex_words) / len(union) if union else 0.0
+            if jaccard >= threshold:
+                logger.info(
+                    "MCQ rejected: sub-topic saturation (J=%.2f) concept=%r q=%r",
+                    jaccard, concept, question[:70]
+                )
+                return True
+    return False
+
+def _register_mcq_subtopic(
+    candidate_q: dict,
+    seen_mcq_by_concept: Dict[str, List[frozenset]],
+    mcq_concept_lock: threading.Lock,
+) -> None:
+    concept  = (candidate_q.get("concept") or "").lower().strip()
+    question = candidate_q.get("question") or ""
+    cwords   = _mcq_subtopic_words(question)
+    with mcq_concept_lock:
+        if concept not in seen_mcq_by_concept:
+            seen_mcq_by_concept[concept] = []
+        seen_mcq_by_concept[concept].append(cwords)
+
+
+# =====================================================
+# Fix-25: LAZY BLOOM OPENER VALIDATOR
+# =====================================================
+_LAZY_BLOOM_OPENER_RE = re.compile(
+    r"^(analyze|evaluate|assess|create|design|develop)\s+.{5,60}[:]\s*"
+    r"(which|what).{0,60}(best illustrates|best shows|best describes|best explains|best represents)",
+    re.IGNORECASE
+)
+
+def _is_lazy_bloom_opener(question: str) -> bool:
+    return bool(_LAZY_BLOOM_OPENER_RE.match(question))
+
+# =====================================================
+# TF SEMANTIC DUPLICATE DETECTION
 # =====================================================
 _TF_SEM_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
@@ -1005,11 +1358,6 @@ _TF_SEM_SW = re.compile(
 
 @lru_cache(maxsize=1024)
 def _tf_content_words(question: str) -> frozenset:
-    """
-    Opt 15 (v4.3): memoised via lru_cache.
-    The same question string is often checked multiple times across retry
-    attempts; caching avoids redundant regex + tokenisation work.
-    """
     q = re.sub(r"[^\w\s]", " ", question.lower())
     q = _TF_SEM_SW.sub(" ", q)
     q = re.sub(r"\s+", " ", q).strip()
@@ -1020,11 +1368,6 @@ def _is_tf_semantic_duplicate(
     seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
     tf_lock: threading.Lock,
 ) -> bool:
-    """
-    Fix 14 (v4.2): Jaccard similarity check for TF questions.
-    Rejects when J >= 0.55 against any previously accepted TF statement
-    for the same concept.
-    """
     concept  = (candidate_q.get("concept") or "").lower().strip()
     question = candidate_q.get("question") or ""
     cwords   = _tf_content_words(question)
@@ -1050,7 +1393,6 @@ def _register_tf_question(
     seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
     tf_lock: threading.Lock,
 ) -> None:
-    """Record a successfully accepted TF question in the per-concept tracker."""
     concept  = (candidate_q.get("concept") or "").lower().strip()
     question = candidate_q.get("question") or ""
     answer   = (candidate_q.get("answer") or "").lower().strip()
@@ -1061,17 +1403,13 @@ def _register_tf_question(
         seen_tf_by_concept[concept].append((cwords, answer))
 
 # =====================================================
-# Fix 15 (v4.2) — TF ANSWER-BALANCE NUDGE
+# TF ANSWER-BALANCE NUDGE
 # =====================================================
 def _tf_balance_note(
     concept: str,
     seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
     tf_lock: threading.Lock,
 ) -> str:
-    """
-    Fix 15 (v4.2): return a balance hint when a concept's TF answers are
-    all the same polarity (>= 2 of one side, 0 of the other).
-    """
     with tf_lock:
         existing = seen_tf_by_concept.get(concept.lower().strip(), [])
     if len(existing) < 2:
@@ -1085,32 +1423,66 @@ def _tf_balance_note(
     return ""
 
 # =====================================================
-# Opt 8 (v4.2) — OPEN-ENDED BLOOM+CONCEPT TRACKER
+# OPEN-ENDED BLOOM+CONCEPT TRACKER (Fix-48 v4.11)
 # =====================================================
+_OPEN_STARTER_VERB_RE = re.compile(
+    r"^(evaluate|assess|analyze|examine|compare|justify|critique|judge|"
+    r"design|propose|formulate|develop|construct|create|build|apply|"
+    r"demonstrate|solve|use|discuss|explain|describe)\b",
+    re.IGNORECASE
+)
+
+def _extract_open_starter_verb(question: str) -> str:
+    m = _OPEN_STARTER_VERB_RE.match((question or "").strip())
+    return m.group(1).lower() if m else ""
+
 def _open_bloom_concept_key(topic: str, bloom: str) -> str:
     return f"{topic.lower().strip()}::{bloom.lower().strip()}"
 
 def _open_diversity_note(
     topic: str,
     bloom: str,
+    question: str,
     seen_open_combos: Set[str],
+    seen_open_verbs: Dict[str, Set[str]],
     open_lock: threading.Lock,
 ) -> str:
-    key = _open_bloom_concept_key(topic, bloom)
+    key      = _open_bloom_concept_key(topic, bloom)
+    verb     = _extract_open_starter_verb(question)
+    verb_key = f"{key}::verb"
+    notes = []
     with open_lock:
         if key in seen_open_combos:
-            return "Different angle from before — focus on a distinct aspect or example."
-    return ""
+            notes.append("Different angle — focus on a distinct aspect or example.")
+        if verb and verb_key in seen_open_verbs and verb in seen_open_verbs[verb_key]:
+            bloom_verbs = {
+                "evaluating": ["Assess", "Critique", "Judge", "Justify"],
+                "creating":   ["Design", "Formulate", "Propose", "Develop"],
+                "applying":   ["Demonstrate", "Apply", "Solve", "Use"],
+                "analyzing":  ["Compare", "Examine", "Analyze"],
+            }
+            alternatives = bloom_verbs.get(bloom.lower(), [])
+            alt_str = " / ".join(alternatives) if alternatives else "a different verb"
+            notes.append(f"Use a different question starter — try: {alt_str}.")
+    return " ".join(notes)
 
 def _register_open_question(
     topic: str,
     bloom: str,
+    question: str,
     seen_open_combos: Set[str],
+    seen_open_verbs: Dict[str, Set[str]],
     open_lock: threading.Lock,
 ) -> None:
-    key = _open_bloom_concept_key(topic, bloom)
+    key      = _open_bloom_concept_key(topic, bloom)
+    verb     = _extract_open_starter_verb(question)
+    verb_key = f"{key}::verb"
     with open_lock:
         seen_open_combos.add(key)
+        if verb:
+            if verb_key not in seen_open_verbs:
+                seen_open_verbs[verb_key] = set()
+            seen_open_verbs[verb_key].add(verb)
 
 # =====================================================
 # VALIDATORS
@@ -1120,47 +1492,109 @@ _OPEN_PLACEHOLDERS = {
     "model answer here", "model answer here.", "answer here",
     "write answer here", "<complete model answer based on context>",
     "<write a complete model answer>",
+    "<exactly 1 complete sentence answer based on context>",
+    "1 complete sentence answer based on context.",
 }
+
+_MCQ_CHOICE_PLACEHOLDER_RE = re.compile(
+    r'^(choice text|option [abcd]|answer [abcd]|placeholder|n/a|none)\s*$',
+    re.IGNORECASE
+)
 
 def _is_valid_answer(q: dict, display_type: str) -> bool:
     answer  = clean_text(str(q.get("answer") or "")).strip()
     ans_low = answer.lower().rstrip(".")
     if ans_low in _ANSWER_ALWAYS_BAD: return False
+
     if display_type == "mcq":
         choices = q.get("choices") or []
         if not answer: return False
-        if re.fullmatch(r"[a-d]", ans_low) and not choices: return False
-        if choices and len(choices) >= 2:
-            stripped = [c.lower().strip() for c in choices if c.strip()]
-            if len(stripped) != len(set(stripped)):
-                logger.info("MCQ rejected: duplicate choices detected %r", stripped)
+
+        if len(choices) != 4:
+            logger.info("MCQ rejected: expected 4 choices, got %d", len(choices))
+            return False
+
+        for c in choices:
+            if not c or not c.strip():
+                logger.info("MCQ rejected: empty choice detected")
                 return False
-            if _has_semantic_duplicate_choices(choices):
+            if _choice_has_letter_prefix(c):
+                logger.info("MCQ rejected: choice still has letter prefix: %r", c[:60])
                 return False
-            if not _is_valid_blank_completion(q):
+            if _MCQ_CHOICE_PLACEHOLDER_RE.match(c.strip()):
+                logger.info("MCQ rejected: placeholder choice: %r", c[:60])
                 return False
-            answer_text_expl = clean_text(str(q.get("answer_text") or ""))
-            if answer_text_expl and len(choices) >= 3:
-                ans_idx = next(
-                    (i for i, c in enumerate(choices)
-                     if c.lower().strip() == answer.lower().strip()),
-                    None
+
+        choices_lower = [c.lower().strip() for c in choices]
+        answer_lower  = answer.lower().strip()
+        if answer_lower not in choices_lower:
+            matched = any(
+                answer_lower in c or c in answer_lower
+                for c in choices_lower
+                if len(c) > 5 and len(answer_lower) > 5
+            )
+            if not matched:
+                logger.info(
+                    "MCQ rejected: answer %r not found in choices %r",
+                    answer[:60], choices_lower
                 )
-                if ans_idx is not None:
-                    ans_letter = chr(ord("A") + ans_idx)
-                    ok, _ = _answer_matches_explanation(ans_letter, choices, answer_text_expl)
-                    if not ok:
-                        logger.info("MCQ rejected: answer doesn't match its own explanation "
-                                    "(record answer=%r)", answer[:60])
-                        return False
+                return False
+
+        stripped = [c.lower().strip() for c in choices if c.strip()]
+        if len(stripped) != len(set(stripped)):
+            logger.info("MCQ rejected: duplicate choices detected %r", stripped)
+            return False
+
+        if _has_semantic_duplicate_choices(choices):
+            return False
+        if not _is_valid_blank_completion(q):
+            return False
+
+        answer_text_expl = clean_text(str(q.get("answer_text") or ""))
+        if answer_text_expl and len(choices) >= 3:
+            ans_idx = next(
+                (i for i, c in enumerate(choices)
+                 if c.lower().strip() == answer_lower),
+                None
+            )
+            if ans_idx is not None:
+                ans_letter = chr(ord("A") + ans_idx)
+                ok, _ = _answer_matches_explanation(ans_letter, choices, answer_text_expl)
+                if not ok:
+                    logger.info("MCQ rejected: answer doesn't match its own explanation "
+                                "(record answer=%r)", answer[:60])
+                    return False
         return True
+
     elif display_type == "truefalse":
         return ans_low in ("true", "false")
+
     elif display_type == "open_ended":
         if len(answer) < 15: return False
         if ans_low in _OPEN_PLACEHOLDERS: return False
         if re.match(r"^(model answer|answer\s*:)", ans_low): return False
+        sentence_count = len(re.findall(r'(?<=[.!?])\s+[A-Z]', answer))
+        if sentence_count >= 2:
+            logger.info("Open-ended rejected: answer has %d+ sentences: %r",
+                        sentence_count + 1, answer[:80])
+            return False
+
     return True
+
+
+# =====================================================
+# Fix-46 (v4.11): TF CONTEXT-FRAMING REJECTION
+# =====================================================
+_TF_CONTEXT_FRAMING_RE = re.compile(
+    r"^(in the context of\b|"
+    r"in a scenario where\b|"
+    r"given (the context|that [a-z].{3,60}(must|should|can|is|are|will|would))\b|"
+    r"assuming (that\b|a\b|an\b)|"
+    r"when considering\b|"
+    r"under the assumption\b|"
+    r"in (this|the) case (where|of)\b)",
+    re.IGNORECASE
+)
 
 _TF_NEGATED_RE = re.compile(
     r"^(it is (false|not true|incorrect|inaccurate|wrong) that\b|"
@@ -1203,9 +1637,62 @@ def _is_valid_tf(q: dict) -> bool:
     if len(question.strip()) < 25: return False
     if _TF_META_STATEMENT_RE.match(question): return False
     if answer == "false" and _TF_NEGATION_IN_STMT.search(question):
-        logger.info("TF rejected: double-negative (negation in stmt + answer=false): %r", question[:80])
+        logger.info("TF rejected: double-negative: %r", question[:80])
+        return False
+    if _TF_CONTEXT_FRAMING_RE.match(question):
+        logger.info("TF rejected: context-framing starter: %r", question[:80])
         return False
     return True
+
+
+# =====================================================
+# Fix-49 (v4.12): FALLBACK QUALITY GATE
+# Fix-56 (v4.13): "which statement best" exempt for Analyzing bloom.
+# =====================================================
+def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
+    """
+    Quality gate for dataset fallback questions.
+    Only the clearest violations are rejected to avoid inflating failures.
+    """
+    qtext = (q.get("question") or "").strip()
+    if not qtext or len(qtext) < 20:
+        return False
+
+    # Always reject term-definition questions
+    if _is_term_definition_question(qtext):
+        logger.info("Fallback rejected: term-def question: %r", qtext[:70])
+        return False
+
+    if display_type == "mcq":
+        # Fix-56: "Which statement best" is allowed for Analyzing bloom
+        _fb_bloom = (q.get("bloom") or "").strip()
+        if _is_which_statement_best(qtext) and _fb_bloom not in ("Analyzing", "Understanding"):
+            logger.info("Fallback rejected: which-statement-best (bloom=%s): %r",
+                        _fb_bloom, qtext[:70])
+            return False
+        # Reject negation in stem
+        if _is_mcq_negation_question(qtext):
+            logger.info("Fallback rejected: negation in MCQ stem: %r", qtext[:70])
+            return False
+        choices = q.get("choices") or []
+        if len(choices) != 4:
+            return False
+        # Reject same-first-word choices (pronouns now exempt — Fix-55)
+        if _choices_have_same_first_word(choices):
+            logger.info("Fallback rejected: same-first-word choices for: %r", qtext[:60])
+            return False
+        answer = (q.get("answer") or "").strip()
+        if not answer:
+            return False
+
+    elif display_type == "truefalse":
+        # Apply full TF validation (includes context-framing check)
+        if not _is_valid_tf(q):
+            logger.info("Fallback rejected: invalid TF: %r", qtext[:70])
+            return False
+
+    return True
+
 
 # =====================================================
 # SINGLE QUESTION GENERATOR
@@ -1213,15 +1700,10 @@ def _is_valid_tf(q: dict) -> bool:
 _RETRY_NOTES = [
     "",
     "Try a different angle — focus on a specific component or detail.",
-    "Ask about a consequence or real-world application.",
-    "Use a concrete scenario or example.",
+    "Use a concrete scenario or example from the context.",
 ]
 
-# Opt 17 (v4.3): reduced from 5 → 4.  Better validation ordering means
-# failures are caught earlier (cheap set lookups before expensive Jaccard),
-# so a 4th attempt rarely improves on a 3rd.  One fewer network round-trip
-# per hard question.
-_MAX_ATTEMPTS = 4
+_MAX_ATTEMPTS = 3
 
 def _generate_single(
     topic, prompt_type, display_type, bloom, context, max_tok,
@@ -1230,15 +1712,21 @@ def _generate_single(
     seen_answer_fps=None, answer_fp_lock=None,
     seen_tf_by_concept=None, tf_concept_lock=None,
     seen_open_combos=None, open_combos_lock=None,
+    seen_open_verbs=None,
+    seen_term_defs=None, term_def_lock=None,
+    seen_mcq_by_concept=None, mcq_concept_lock=None,
+    seen_mcq_openers=None, mcq_opener_lock=None,
 ):
-    instruction  = AUTOTOS_INSTRUCTION_OPEN if prompt_type == "open" else AUTOTOS_INSTRUCTION
-    # Opt 16 (v4.3): cap avoid_list at source to match _build_avoid_block's [-3:] slice.
-    avoid_list   = list(seen_questions or [])[-3:]
-    # Opt 10 (v4.3): pick context window size based on question type.
-    ctx_size     = _NUM_CTX.get(prompt_type, 1024)
+    instruction = AUTOTOS_INSTRUCTION_OPEN if prompt_type == "open" else AUTOTOS_INSTRUCTION
+    ctx_size    = _NUM_CTX.get(prompt_type, 1024)
+
+    all_seen   = list(seen_questions or [])
+    concept_lc = topic.lower()
+    concept_specific = [s for s in all_seen if concept_lc in s.lower()]
+    avoid_list = list(dict.fromkeys(concept_specific[-2:] + all_seen[-3:]))[-3:]
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
-        temp = min(0.85, 0.45 + 0.15 * (attempt - 1))
+        temp = min(0.80, 0.45 + 0.175 * (attempt - 1))
 
         attempt_note = _RETRY_NOTES[min(attempt - 1, len(_RETRY_NOTES) - 1)]
 
@@ -1248,9 +1736,19 @@ def _generate_single(
                 attempt_note = f"{attempt_note} {balance}".strip() if attempt_note else balance
 
         if prompt_type == "open" and seen_open_combos is not None and open_combos_lock is not None:
-            diversity = _open_diversity_note(topic, bloom, seen_open_combos, open_combos_lock)
+            diversity = _open_diversity_note(
+                topic, bloom, "",
+                seen_open_combos, seen_open_verbs or {},
+                open_combos_lock
+            )
             if diversity:
                 attempt_note = f"{attempt_note} {diversity}".strip() if attempt_note else diversity
+
+        # Fix-52 (v4.12): pre-generation opener hint for MCQ
+        if prompt_type == "mcq" and seen_mcq_openers is not None and mcq_opener_lock is not None:
+            opener_hint = _mcq_opener_hint(topic, seen_mcq_openers, mcq_opener_lock)
+            if opener_hint:
+                attempt_note = f"{attempt_note} {opener_hint}".strip() if attempt_note else opener_hint
 
         prompt = build_training_prompt(
             instruction, prompt_type, bloom, topic, context,
@@ -1259,11 +1757,9 @@ def _generate_single(
             attempt=attempt,
         )
 
-        # Opt 10 (v4.3): pass per-type num_ctx to the model caller.
         generated = ask_model(prompt, max_tokens=max_tok, temperature=temp, num_ctx=ctx_size)
         if generated is None:
             logger.info("Single gen failed record=%d attempt=%d", record_idx, attempt)
-            # Opt 12 (v4.3): halved sleep — 0.05×attempt (was 0.10×attempt).
             time.sleep(0.05 * attempt)
             continue
 
@@ -1274,14 +1770,98 @@ def _generate_single(
             time.sleep(0.05 * attempt)
             continue
 
-        # TF fast-path: cheap regex validators before anything else.
+        # Fix-44/49: reject term-definition questions
+        if _is_term_definition_question(qtext):
+            concept_key = concept_lc
+            bloom_lower = bloom.lower()
+            allowed = bloom_lower in ("remembering", "understanding")
+            if allowed and seen_term_defs is not None and term_def_lock is not None:
+                with term_def_lock:
+                    count = seen_term_defs.get(concept_key, 0)
+                    if count >= 1:
+                        allowed = False
+                    else:
+                        seen_term_defs[concept_key] = count + 1
+            if not allowed:
+                logger.info("Rejected term-def question record=%d bloom=%s q=%r",
+                            record_idx, bloom, qtext[:70])
+                avoid_list.append(qtext[:25])
+                avoid_list = avoid_list[-3:]
+                time.sleep(0.05 * attempt); continue
+
+        # Fix-45 / Fix-56: reject "Which statement best..." except for Analyzing bloom
+        if _is_which_statement_best(qtext) and bloom not in ("Analyzing",):
+            logger.info("Rejected 'which statement best' record=%d bloom=%s q=%r",
+                        record_idx, bloom, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # Fix-51 (v4.12): reject MCQ negation in question stem
+        if display_type == "mcq" and _is_mcq_negation_question(qtext):
+            logger.info("MCQ rejected: negation in stem record=%d q=%r",
+                        record_idx, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # Fix-52 (v4.12): MCQ opener overuse check
+        if (display_type == "mcq" and
+                seen_mcq_openers is not None and mcq_opener_lock is not None):
+            if _is_mcq_opener_overused(candidate_q, seen_mcq_openers, mcq_opener_lock):
+                logger.info("MCQ rejected: overused opener record=%d q=%r",
+                            record_idx, qtext[:70])
+                avoid_list.append(qtext[:25])
+                avoid_list = avoid_list[-3:]
+                time.sleep(0.05 * attempt); continue
+
+        # Fix-25: reject lazy bloom opener
+        if _is_lazy_bloom_opener(qtext):
+            logger.info("Rejected lazy bloom opener record=%d q=%r", record_idx, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # Fix-37: MCQ Bloom-level question-starter check
+        if display_type == "mcq" and not _is_valid_mcq_bloom_pattern(qtext, bloom):
+            logger.info(
+                "MCQ rejected: Bloom starter mismatch level=%s record=%d q=%r",
+                bloom, record_idx, qtext[:70]
+            )
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # TF fast-path validators
         if display_type == "truefalse":
             if not _is_valid_tf(candidate_q):
                 time.sleep(0.05 * attempt); continue
 
-        # ── Opt 14 (v4.3): FINGERPRINT DEDUP MOVED UP ──────────────────────
-        # O(1) set lookup — runs before the expensive Jaccard / choice-dedup
-        # validators, so structural duplicates are rejected cheaply.
+        # Fix-48: open-ended verb diversity check
+        if display_type == "open_ended" and seen_open_combos is not None and open_combos_lock is not None:
+            verb     = _extract_open_starter_verb(qtext)
+            verb_key = f"{_open_bloom_concept_key(topic, bloom)}::verb"
+            if verb and seen_open_verbs is not None:
+                with open_combos_lock:
+                    used_verbs = seen_open_verbs.get(verb_key, set())
+                    if verb in used_verbs:
+                        logger.info(
+                            "Open-ended rejected: verb '%s' reused for concept=%r bloom=%s",
+                            verb, topic, bloom
+                        )
+                        avoid_list.append(qtext[:25])
+                        avoid_list = avoid_list[-3:]
+                        time.sleep(0.05 * attempt); continue
+
+        # Fix-53 (v4.12): MCQ sub-topic saturation check
+        if (display_type == "mcq" and
+                seen_mcq_by_concept is not None and mcq_concept_lock is not None):
+            if _is_mcq_subtopic_saturated(candidate_q, seen_mcq_by_concept, mcq_concept_lock):
+                avoid_list.append(_question_stem(candidate_q)[:25])
+                avoid_list = avoid_list[-3:]
+                time.sleep(0.05 * attempt); continue
+
+        # Global fingerprint dedup
         fp = _question_fingerprint(candidate_q)
         is_dup = False
         if fp_lock:
@@ -1292,12 +1872,11 @@ def _generate_single(
             if fp in seen_fps: is_dup = True
             else: seen_fps.add(fp)
         if is_dup:
-            avoid_list.append(_question_stem(candidate_q))
-            if len(avoid_list) > 3:     # keep cap tight
-                avoid_list = avoid_list[-3:]
+            avoid_list.append(_question_stem(candidate_q)[:25])
+            avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # MCQ answer fingerprint dedup (O(1)) — also before full validation.
+        # MCQ answer fingerprint dedup
         if seen_answer_fps is not None:
             ans_fp = _answer_fingerprint(candidate_q)
             if ans_fp:
@@ -1310,38 +1889,44 @@ def _generate_single(
                     if ans_fp in seen_answer_fps: is_ans_dup = True
                     else: seen_answer_fps.add(ans_fp)
                 if is_ans_dup:
-                    logger.info("MCQ rejected: same-answer near-duplicate record=%d "
-                                "ans_fp=%r", record_idx, ans_fp[:60])
-                    avoid_list.append(_question_stem(candidate_q))
-                    if len(avoid_list) > 3:
-                        avoid_list = avoid_list[-3:]
+                    logger.info("MCQ rejected: same-answer near-duplicate record=%d",
+                                record_idx)
+                    avoid_list.append(_question_stem(candidate_q)[:25])
+                    avoid_list = avoid_list[-3:]
                     time.sleep(0.05 * attempt); continue
-        # ── End Opt 14 block ─────────────────────────────────────────────────
 
-        # TF semantic dedup (Jaccard — moderate cost, runs after cheap checks).
+        # TF semantic dedup
         if display_type == "truefalse":
             if seen_tf_by_concept is not None and tf_concept_lock is not None:
                 if _is_tf_semantic_duplicate(candidate_q, seen_tf_by_concept, tf_concept_lock):
-                    avoid_list.append(_question_stem(candidate_q))
-                    if len(avoid_list) > 3:
-                        avoid_list = avoid_list[-3:]
+                    avoid_list.append(_question_stem(candidate_q)[:25])
+                    avoid_list = avoid_list[-3:]
                     time.sleep(0.05 * attempt); continue
 
-        # Full answer / choice validity (most expensive — runs last).
+        # Full answer/choice validity (most expensive — last)
         if not _is_valid_answer(candidate_q, display_type):
             logger.info("Invalid answer record=%d attempt=%d ans=%r",
                         record_idx, attempt, candidate_q.get("answer", ""))
-            avoid_list.append(qtext[:60])
-            if len(avoid_list) > 3:
-                avoid_list = avoid_list[-3:]
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # All checks passed — register in type-specific trackers before returning.
-        if display_type == "truefalse" and seen_tf_by_concept is not None and tf_concept_lock is not None:
+        # ── All checks passed — register state ──────────────────────────
+        if display_type == "truefalse" and seen_tf_by_concept is not None:
             _register_tf_question(candidate_q, seen_tf_by_concept, tf_concept_lock)
 
-        if display_type == "open_ended" and seen_open_combos is not None and open_combos_lock is not None:
-            _register_open_question(topic, bloom, seen_open_combos, open_combos_lock)
+        if display_type == "open_ended" and seen_open_combos is not None:
+            _register_open_question(
+                topic, bloom, qtext,
+                seen_open_combos, seen_open_verbs or {},
+                open_combos_lock
+            )
+
+        if display_type == "mcq":
+            if seen_mcq_by_concept is not None and mcq_concept_lock is not None:
+                _register_mcq_subtopic(candidate_q, seen_mcq_by_concept, mcq_concept_lock)
+            if seen_mcq_openers is not None and mcq_opener_lock is not None:
+                _register_mcq_opener(candidate_q, seen_mcq_openers, mcq_opener_lock)
 
         return candidate_q
 
@@ -1370,43 +1955,53 @@ def generate_from_records(records, max_items=None):
         context   = ""
         if full_text:
             chunks    = get_chunks_for_text(full_text)
-            text_hash = hashlib.md5(full_text[:256].encode("utf-8", errors="ignore")).hexdigest()[:8]
+            text_hash = hashlib.md5(full_text[:4096].encode("utf-8", errors="ignore")).hexdigest()[:8]
             topic_key = f"{topic}::{text_hash}"
             base_idx  = _find_best_chunk_idx(chunks, topic)
             if topic_key not in topic_slot_counter:
                 idxs = list(range(len(chunks)))
                 if base_idx in idxs: idxs.remove(base_idx)
-                idxs.insert(0, base_idx); random.shuffle(idxs[1:])
+                idxs.insert(0, base_idx)
+                tail = idxs[1:]
+                random.shuffle(tail)
+                idxs[1:] = tail
                 topic_slot_counter[topic_key] = idxs
             idxs      = topic_slot_counter[topic_key]
             chunk_idx = idxs.pop(0)
             if not idxs: topic_slot_counter.pop(topic_key, None)
             context = chunks[chunk_idx]
-            logger.info("record=%d topic=%r bloom=%s -> chunk %d/%d", i+1, topic, bloom, chunk_idx+1, len(chunks))
+            logger.info("record=%d topic=%r bloom=%s -> chunk %d/%d",
+                        i + 1, topic, bloom, chunk_idx + 1, len(chunks))
         else:
-            logger.warning("record=%d topic=%r has NO learning material.", i+1, topic)
+            logger.warning("record=%d topic=%r has NO learning material.", i + 1, topic)
         slots.append({"record_idx": i, "topic": topic, "bloom": bloom,
                       "prompt_type": prompt_type, "display_type": display_type,
                       "context": context, "record": rec})
 
-    # Shared dedup state (all types)
-    _fp_lock         = threading.Lock()
-    _answer_fp_lock  = threading.Lock()
-    _stems_lock      = threading.Lock()
-    seen_fps:         set  = set()
-    seen_answer_fps:  set  = set()
+    # ── Shared dedup / tracking state ───────────────────────────────────
+    _fp_lock        = threading.Lock()
+    _answer_fp_lock = threading.Lock()
+    _stems_lock     = threading.Lock()
+    seen_fps:        set = set()
+    seen_answer_fps: set = set()
+    seen_stems: deque = deque(maxlen=16)
 
-    # Opt 13 (v4.3): deque(maxlen=8) replaces list with manual pop(0).
-    # O(1) append + automatic eviction; no need for the len-check/pop block.
-    seen_stems: deque = deque(maxlen=8)
-
-    # Fix 14/15 (v4.2): TF per-concept tracker
     _tf_concept_lock: threading.Lock = threading.Lock()
     seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]] = {}
 
-    # Opt 8 (v4.2): open-ended bloom+concept tracker
     _open_combos_lock: threading.Lock = threading.Lock()
     seen_open_combos: Set[str] = set()
+    seen_open_verbs:  Dict[str, Set[str]] = {}
+
+    _term_def_lock: threading.Lock = threading.Lock()
+    seen_term_defs: Dict[str, int] = {}
+
+    # Fix-52/53 (v4.12): MCQ-specific trackers
+    _mcq_concept_lock: threading.Lock = threading.Lock()
+    seen_mcq_by_concept: Dict[str, List[frozenset]] = {}
+
+    _mcq_opener_lock: threading.Lock = threading.Lock()
+    seen_mcq_openers: Dict[str, Dict[str, int]] = {}
 
     with _gen_progress_lock:
         _gen_progress["current"] = 0
@@ -1420,7 +2015,7 @@ def generate_from_records(records, max_items=None):
         q = _generate_single(
             slot["topic"], slot["prompt_type"], slot["display_type"],
             slot["bloom"], slot["context"],
-            MAX_TOKENS_SINGLE.get(slot["prompt_type"], 256),
+            MAX_TOKENS_SINGLE.get(slot["prompt_type"], 115),
             seen_fps, slot["record_idx"] + 1,
             seen_questions=stems_snapshot,
             fp_lock=_fp_lock,
@@ -1430,12 +2025,18 @@ def generate_from_records(records, max_items=None):
             tf_concept_lock=_tf_concept_lock,
             seen_open_combos=seen_open_combos,
             open_combos_lock=_open_combos_lock,
+            seen_open_verbs=seen_open_verbs,
+            seen_term_defs=seen_term_defs,
+            term_def_lock=_term_def_lock,
+            seen_mcq_by_concept=seen_mcq_by_concept,
+            mcq_concept_lock=_mcq_concept_lock,
+            seen_mcq_openers=seen_mcq_openers,
+            mcq_opener_lock=_mcq_opener_lock,
         )
 
         with _gen_progress_lock:
             _gen_progress["current"] += 1
 
-        # Opt 13 (v4.3): deque.append() is O(1); maxlen handles eviction.
         if q is not None:
             stem = _question_stem(q)
             if stem:
@@ -1467,18 +2068,30 @@ def generate_from_records(records, max_items=None):
         if q is not None:
             out_questions.append(q)
         else:
+            # ── Fix-49 (v4.12): validate dataset fallback before using ──
             rec      = slot["record"]
             fallback = rec.get("output") if isinstance(rec, dict) else None
+            used_fallback = False
             if fallback and isinstance(fallback, dict):
-                out_questions.append(normalize_generated_question(
-                    fallback, slot["display_type"], slot["topic"], slot["bloom"]))
-            else:
+                normalized_fb = normalize_generated_question(
+                    fallback, slot["display_type"], slot["topic"], slot["bloom"])
+                if _is_valid_fallback_question(normalized_fb, slot["display_type"]):
+                    out_questions.append(normalized_fb)
+                    used_fallback = True
+                else:
+                    logger.info(
+                        "Fallback rejected for record=%d concept=%r — using placeholder.",
+                        slot["record_idx"] + 1, slot["topic"]
+                    )
+            if not used_fallback:
                 out_questions.append({
-                    "type": slot["display_type"], "concept": slot["topic"],
-                    "bloom": slot["bloom"],
+                    "type":    slot["display_type"],
+                    "concept": slot["topic"],
+                    "bloom":   slot["bloom"],
                     "question": f"[GENERATION FAILED] Review this item — {slot['topic']}",
                     "choices": (["(Generation failed)"] * 4 if slot["display_type"] == "mcq" else []),
-                    "answer": "", "answer_text": "Generation failed. Please delete or replace.",
+                    "answer": "",
+                    "answer_text": "Generation failed. Please delete or replace.",
                     "_generation_failed": True,
                 })
     return out_questions
@@ -1498,11 +2111,12 @@ def generate_quiz_for_topics(records_or_topics, max_items=None, test_labels=None
     return {"quizzes": quizzes}
 
 def get_model_cache_stats():
+    cache_files = sum(1 for f in os.listdir(MODEL_CACHE_DIR) if f.endswith(".json"))
     return {
-        "cache_hits":   CACHE_HITS,
-        "cache_misses": CACHE_MISSES,
-        # Opt 9 (v4.3): expose mem cache occupancy for observability.
-        "mem_cache_size": len(_mem_cache._cache),
+        "cache_hits":       CACHE_HITS,
+        "cache_misses":     CACHE_MISSES,
+        "mem_cache_size":   len(_mem_cache._cache),
+        "disk_cache_files": cache_files,
     }
 
 def load_jsonl(path):
@@ -1518,7 +2132,7 @@ def load_jsonl(path):
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(title="AutoTOS AI Service", version="4.3-ollama")
+app = FastAPI(title="AutoTOS AI Service", version="4.13-ollama")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
 
@@ -1534,10 +2148,11 @@ class ExtractRequest(BaseModel):
 async def health():
     ready = _ollama_ready or _check_ollama()
     return {"status": "ok" if ready else "degraded",
-            "ollama_ready": ready,
-            "ollama_model": OLLAMA_MODEL,
-            "chunk_size": CHUNK_SIZE,
-            "generation_workers": GENERATION_WORKERS}
+            "ollama_ready":       ready,
+            "ollama_model":       OLLAMA_MODEL,
+            "chunk_size":         CHUNK_SIZE,
+            "generation_workers": GENERATION_WORKERS,
+            "version":            "4.13"}
 
 @app.get("/cache_stats")
 async def cache_stats():
