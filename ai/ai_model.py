@@ -3,41 +3,74 @@
 # ── Patch history ──────────────────────────────────────────────────────────
 # v4.9  – Instruction trim, Bloom pattern relaxation.
 # v4.10 – Qwen3-4B token + negation fixes.
-# v4.11 – Term-def expansion (Fix-44), "which statement best" hard-reject
-#          (Fix-45), TF context-framing rejection (Fix-46), instruction
-#          rewrite for small models (Fix-47), open-ended verb diversity (Fix-48).
+# v4.11 – Term-def expansion, "which statement best" hard-reject,
+#          TF context-framing rejection, instruction rewrite, open verb diversity.
+# v4.12 – MCQ diversity + fallback validation pass.
+# v4.13 – Pronoun starters allowed, Analyzing bloom relaxation.
 #
-# v4.12 (MCQ diversity + fallback validation pass)
+# v4.14  (Training-inference alignment)
+#       Fix-58 – AUTOTOS_INSTRUCTION exact copy of train_v15.py.
+#       Fix-59 – "Which statement best" exempt for Understanding bloom.
+#       Fix-60 – "How would you implement/justify" re-allowed.
+#       Fix-61 – Open-ended answers expanded to 2 sentences.
+#       Fix-62 – TF note softened to match training.
 #
-#       Fix-49 – Fallback quality gate.
-#       Fix-50 – Same-first-word choice detection.
-#       Fix-51 – MCQ negation in question stem.
-#       Fix-52 – "How does" opener — per-concept cap.
-#       Fix-53 – MCQ sub-topic saturation via per-concept content-word Jaccard.
-#       Fix-54 – Choices content-word threshold lowered 5 → 4 chars.
+# v4.15  (Definition-pattern coverage)
+#       Fix-63 – _TERM_DEF_QUESTION_RE: "Define X" and "Explain the meaning".
 #
-# v4.13 (Pronoun starters + Analyzing bloom relaxation)
+# v4.16  (Diversity + dataset cleanup)
+#       Fix-64 – Same-first-word exempt: question-word starters (how/what/etc).
+#       Fix-65 – Analyzing Bloom pattern: "how would you compare/examine/…".
+#       Fix-66 – Purpose-question cap: "what_is_purpose" capped opener.
+#       Fix-67 – Junk distractor guard (_has_junk_distractors).
+#       Fix-68 – MCQ subtopic SW: add purpose/goal/aim/role/function stopwords.
 #
-#       Fix-55 – Pronoun starters allowed in same-first-word check.
-#                "it/they/this/these/there/its/he/she/we/our" are no longer
-#                blanket-rejected by _choices_have_same_first_word.
-#                "It reduces X / It prevents Y / It enables Z / It brings Z"
-#                are valid, meaningfully different choices that share only the
-#                subject pronoun. Pairwise Jaccard in
-#                _has_semantic_duplicate_choices handles genuine clones.
+# v4.17  (Quality fixes from test-output audit)
+#       Fix-68 – _MCQ_SUBTOPIC_SW actually applied (was in notes, not code).
+#       Fix-69 – MCQ meta-phrase ban ("in the context of this scenario").
+#       Fix-70 – "behaves under load" lazy template ban.
+#       Fix-71 – "How would you describe/explain" capped opener.
+#       Fix-72 – "What does X involve?" added to term-def rejection.
+#       Fix-73 – Junk answer_text template detection.
+#       Fix-74 – Circular choice detection (choice mirrors question stem).
+#       Fix-75 – _mcq_opener_hint indentation fixed.
 #
-#       Fix-56 – "Which statement best" allowed for Analyzing bloom.
-#                The rejection in _generate_single and _is_valid_fallback_question
-#                now checks bloom before rejecting — Analyzing is exempt.
-#                "Which statement best explains the relationship between X and Y?"
-#                is a valid Analyzing question.
+# v4.18  (Item-count guarantee — BUG FIXES)
+#       Fix-76 – ThreadPoolExecutor future.result() wrapped in try/except so a
+#                single worker crash no longer silently wipes ALL results.
+#       Fix-77 – Safety net after executor block fills any remaining None slots
+#                with placeholders, guaranteeing len(out)==len(records_sent).
+#       Fix-78 – /generate and /generate_from_records endpoints now emit a
+#                WARNING when len(records) < max_items so frontend off-by-one
+#                bugs in TOS→records conversion are immediately visible in logs.
 #
-#       Fix-57 – "What is the main/primary/key difference" accepted for Analyzing.
-#                _BLOOM_MCQ_PATTERNS["Analyzing"] now allows an optional qualifier
-#                word (main|primary|key|core|significant|major|fundamental|
-#                critical|notable) between "the" and the noun group.
-#                "Which statement best" also added to the Analyzing pattern so
-#                _is_valid_mcq_bloom_pattern does not double-reject it.
+# ROOT CAUSE of "15 items instead of 20" issue
+# ─────────────────────────────────────────────
+# The backend always returns exactly as many items as records it receives.
+# Receiving 15 records → 15 items out (with placeholders for failed slots).
+#
+# The frontend's TOS→records conversion had an off-by-one in item-range
+# construction.  For a TOS cell whose item numbers are "1–4" (4 items),
+# the frontend was producing range(1, 4) = [1,2,3] instead of
+# range(1, 5) = [1,2,3,4], yielding one fewer record per multi-item cell.
+#
+# Single-item cells like "18" (Creation column) were also silently dropped
+# for some topics because the loop used  `for i in range(start, end)`
+# where start==end for single-entry cells, producing zero iterations.
+#
+# FIX IN FRONTEND (pseudocode):
+#   # Old (buggy):
+#   for item_num in range(item_start, item_end):   # exclusive end
+#       records.append(make_record(concept, bloom, item_num))
+#
+#   # Fixed:
+#   for item_num in range(item_start, item_end + 1):  # inclusive end
+#       records.append(make_record(concept, bloom, item_num))
+#
+#   # For single-item cells (item_start == item_end), always emit 1 record:
+#   count = max(1, item_end - item_start + 1)
+#   for item_num in range(item_start, item_start + count):
+#       records.append(make_record(concept, bloom, item_num))
 # ============================================================
 
 import os
@@ -136,69 +169,43 @@ _NUM_CTX: Dict[str, int] = {
 MAX_TOKENS_SINGLE: Dict[str, int] = {
     "mcq":  160,
     "tf":    85,
-    "open":  90,
+    "open": 120,
 }
 
 # =====================================================
-# INSTRUCTIONS  (v4.13)
+# INSTRUCTIONS  (v4.14 — exact match to train_v15.py)
 # =====================================================
 AUTOTOS_INSTRUCTION = (
-    "You are AutoTOS. Output ONLY valid JSON.\n"
-    "\n"
-    "NEVER start a question with:\n"
-    "  'What is the term' | 'Which term' | 'What does the term' | 'What is the definition'\n"
-    "  'Which statement best summarizes' | 'Which statement best explains'\n"
-    "  'Which statement best describes' | 'Which of the following statements'\n"
-    "  'How does' | 'How do' | 'How is' | 'How can' | 'How would' | 'How will'\n"
-    "  'Which of the following is not' | 'Which is not' | 'Which are not'\n"
-    "  'Analyze [anything]: Which' | 'Evaluate [anything]: Which best'\n"
-    "\n"
-    "NEVER put these words in a True/False statement:\n"
-    "  not | never | don't | doesn't | isn't | aren't | cannot | can't | won't | no\n"
-    "NEVER start a True/False statement with:\n"
-    "  'In the context of' | 'In a scenario where' | 'Given that'\n"
-    "  'The term ... refers to' | 'X is defined as' | 'Assuming that'\n"
-    "\n"
-    "MCQ JSON:\n"
-    "{\"type\":\"mcq\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
-    "\"choices\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":\"A|B|C|D\","
-    "\"answer_text\":\"1 sentence why correct.\"}\n"
-    "\n"
-    "TF JSON:\n"
-    "{\"type\":\"truefalse\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
-    "\"answer\":\"true|false\",\"answer_text\":\"1 sentence why correct.\"}\n"
-    "\n"
-    "MCQ: exactly 4 choices, no A/B/C/D prefix, answer = A/B/C/D letter.\n"
-    "Choices must be meaningfully different — never start all 4 with the same word.\n"
-    "\n"
-    "Question starters by Bloom level:\n"
-    "  Remembering  → 'What is the primary purpose of X?' | 'What causes X?' | 'Which [noun] is used for X?' | 'When does X occur?'\n"
-    "  Understanding → 'Why is X important for Y?' | 'What happens when X occurs?' | 'In what way does X affect Y?' | 'What role does X play in Y?'\n"
-    "  Applying     → 'Given X, which approach should be used?' | 'How would you implement X?' | 'Which solution best addresses X?'\n"
-    "  Analyzing    → 'What is the relationship between X and Y?' | 'What distinguishes X from Y?' | 'What is the main difference between X and Y?' | 'Which statement best explains the relationship between X and Y?'\n"
-    "  Evaluating   → 'Which approach is most effective for X?' | 'What is the main weakness of X?' | 'Assess X; what is its primary limitation?'\n"
-    "  Creating     → 'Which design best addresses X?' | 'Select the approach that best achieves Y.' | 'Which plan most effectively combines X and Y?'\n"
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions ('What is the term').\n"
+    "- NO 'How does' or 'How will' (unless used for application or creation).\n"
+    "- NO meta-phrases like 'In the context of...' or 'Assuming that...'.\n"
+    "- Avoid misleading or tricky negative phrasing in True/False statements.\n"
+    "- MCQ choices must begin with different words. DO NOT include A/B/C/D prefixes in the choice text.\n\n"
+    "BLOOM'S LEVEL STARTERS:\n"
+    "- Remember/Understand: 'What is the primary purpose of...', 'Why is X important for...', 'Which statement best describes...'\n"
+    "- Apply/Analyze: 'How would you implement...', 'Given X, which approach...', 'What distinguishes X from...'\n"
+    "- Evaluate/Create: 'How would you justify...', 'Which approach is most effective for...', 'Which design best...'\n\n"
+    "MCQ JSON FORMAT:\n"
+    "{\"type\":\"mcq\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"choices\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":\"A|B|C|D\",\"answer_text\":\"Exactly 1 sentence why correct.\"}\n\n"
+    "TF JSON FORMAT:\n"
+    "{\"type\":\"truefalse\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"true|false\",\"answer_text\":\"Exactly 1 sentence why correct.\"}"
 )
 
 AUTOTOS_INSTRUCTION_OPEN = (
-    "You are AutoTOS. Output ONLY valid JSON.\n"
-    "\n"
-    "NEVER start a question with:\n"
-    "  'What does the term' | 'What does ... mean' | 'What is the definition of'\n"
-    "  'The term ... refers to' | 'What is the term' | 'Which term'\n"
-    "\n"
-    "Open-ended JSON:\n"
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions ('What is the term', 'What does ... mean').\n"
+    "- The 'answer' string MUST be exactly 2 complete sentences ending in a period.\n\n"
+    "BLOOM'S LEVEL STARTERS (Higher-Order Only):\n"
+    "- Apply: 'How would you apply X to...', 'Solve...', 'Demonstrate how...'\n"
+    "- Analyze: 'Analyze...', 'Examine the relationship between...'\n"
+    "- Evaluate: 'How would you assess...', 'Justify...', 'Judge the effectiveness of...'\n"
+    "- Create: 'Design...', 'Propose a plan for...'\n\n"
+    "OPEN-ENDED JSON FORMAT:\n"
     "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
-    "\"answer\":\"<exactly 1 complete sentence>\"}\n"
-    "\n"
-    "answer: exactly 1 complete sentence ending with a period.\n"
-    "Question must require application, analysis, evaluation, or creation.\n"
-    "\n"
-    "Question starters by Bloom level:\n"
-    "  Applying   → 'Apply X to show...' | 'Demonstrate how...' | 'Solve...' | 'Use X to...'\n"
-    "  Analyzing  → 'Analyze...' | 'Examine the relationship between...' | 'Compare X and Y...'\n"
-    "  Evaluating → 'Evaluate...' | 'Assess...' | 'Justify...' | 'Critique...' | 'Judge the effectiveness of...'\n"
-    "  Creating   → 'Design...' | 'Propose...' | 'Formulate...' | 'Develop...' | 'Construct a plan for...'\n"
+    "\"answer\":\"<Exactly 2 complete sentences.>\"}"
 )
 
 TYPE_MAP = {
@@ -425,18 +432,26 @@ def _truncate_answer_text(text: str) -> str:
         return truncated.rstrip('.,;:') + "..."
     return first
 
+
 def _truncate_open_answer(text: str) -> str:
+    """Return up to 2 complete sentences (Fix-61 v4.14)."""
     if not text: return ""
     t = re.sub(r"\s+", " ", text).strip()
     t = re.sub(r'^(answer\s*[:\-]\s*)', '', t, flags=re.IGNORECASE).strip()
     if not t: return ""
-    _ABR_RE = re.compile(r'\b(e\.g|i\.e|etc|vs|Mr|Mrs|Dr|Prof|Sr|Jr|St|approx|fig|no)\.\s', re.IGNORECASE)
+    _ABR_RE = re.compile(
+        r'\b(e\.g|i\.e|etc|vs|Mr|Mrs|Dr|Prof|Sr|Jr|St|approx|fig|no)\.\s',
+        re.IGNORECASE
+    )
     masked = _ABR_RE.sub(lambda m: m.group(0).replace('.', '\x00'), t)
     parts = re.split(r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$', masked)
-    first = parts[0].replace('\x00', '.').strip() if parts else t.strip()
-    if first and first[-1] not in ".!?":
-        first = first + "."
-    return first
+    parts = [p.replace('\x00', '.').strip() for p in parts if p.strip()]
+    selected = parts[:2]
+    result = " ".join(selected)
+    if result and result[-1] not in ".!?":
+        result = result + "."
+    return result
+
 
 # =====================================================
 # CHUNKING
@@ -583,10 +598,10 @@ def build_training_prompt(
     tf_note = ""
     if qtype == "tf":
         tf_note = (
-            "\nTF RULES: Write a POSITIVE declarative statement (no question mark).\n"
-            "FORBIDDEN WORDS in statement: not, never, don't, doesn't, isn't, aren't, cannot, can't, won't, no\n"
-            "FORBIDDEN statement starts: 'In the context of', 'In a scenario where', 'Given that', "
-            "'The term ... refers to', 'X is defined as'\n"
+            "\nTF RULES: Write a POSITIVE declarative statement (no question mark). "
+            "Avoid misleading or tricky negative phrasing.\n"
+            "FORBIDDEN starts: 'In the context of', 'In a scenario where', "
+            "'Given that', 'The term ... refers to', 'X is defined as'\n"
         )
 
     retry_line = f"\n{attempt_note.strip()}\n" if attempt_note and attempt_note.strip() else ""
@@ -793,14 +808,10 @@ def _choice_has_letter_prefix(text: str) -> bool:
 
 
 # =====================================================
-# Fix-37 (v4.9): Bloom-level question-starter validator
-# Updated v4.13 (Fix-57): Analyzing pattern now allows optional qualifier
-# words (main/primary/key/etc.) before the noun group, and also accepts
-# "which statement best" as a valid Analyzing opener (Fix-56).
+# Bloom-level question-starter validator
 # =====================================================
 _BLOOM_MCQ_PATTERNS: Dict[str, re.Pattern] = {
     "Analyzing": re.compile(
-        # Fix-57: optional qualifier between "the" and the noun group
         r'^(what (is|are) the '
         r'(main |primary |key |core |significant |major |fundamental |critical |notable )?'
         r'(relationship|difference|distinction|cause|root cause|interaction|component|underlying)\b|'
@@ -808,7 +819,8 @@ _BLOOM_MCQ_PATTERNS: Dict[str, re.Pattern] = {
         r'(analyze|compare|contrast|examine|distinguish|differentiate|categorize|dissect|break down|identify)\b|'
         r'which (architectural|component|structural|key|primary|underlying) (feature|difference|factor|element)\b|'
         r'(analyze|examine) .{3,60}; what (does|is|are)\b|'
-        # Fix-56: "which statement best" is a valid Analyzing opener
+        r'how would you (compare|contrast|examine|analyze|distinguish|differentiate|break down|decompose|identify)\b|'
+        r'what should you (examine|analyze|compare|consider|evaluate|look for)\b|'
         r'which statement (best |most )?(summarizes?|explains?|describes?|illustrates?|represents?|captures?)\b)',
         re.IGNORECASE
     ),
@@ -1016,18 +1028,7 @@ def _answer_matches_explanation(answer_letter, choices, answer_text):
 
 
 # =====================================================
-# Fix-50/54 (v4.12): SAME-FIRST-WORD CHOICE DETECTOR
-# Fix-55 (v4.13):    Pronoun starters are now also exempt.
-#
-# If all 4 choices start with the same core content word the MCQ is
-# definitionally bad — choices are variants of the same idea.
-#
-# EXCEPTION 1: prepositions/conjunctions ("by/in/to/with/for/from…") are
-# legitimate starters for How/Why answer options ("By reducing X").
-# EXCEPTION 2: pronouns ("it/they/this/these/there/its…") are legitimate
-# starters for "It reduces X / It prevents Y / It enables Z" style options
-# that differ meaningfully in predicate. The pairwise Jaccard check in
-# _has_semantic_duplicate_choices catches genuine semantic clones.
+# SAME-FIRST-WORD CHOICE DETECTOR
 # =====================================================
 _PREPOSITION_STARTERS = frozenset({
     "by", "in", "to", "with", "for", "from", "at", "on", "through",
@@ -1035,15 +1036,16 @@ _PREPOSITION_STARTERS = frozenset({
     "during", "because", "although", "since", "as", "that", "upon",
 })
 
-# Fix-55 (v4.13): pronoun starters exempt from same-first-word hard reject.
 _PRONOUN_STARTERS = frozenset({
     "it", "its", "they", "their", "this", "these", "there",
     "he", "she", "we", "our",
 })
 
+_QUESTION_WORD_STARTERS = frozenset({
+    "how", "what", "which", "who", "why", "when", "where", "whether",
+})
+
 def _choices_have_same_first_word(choices: list) -> bool:
-    """Return True if all choices share the same leading content word
-    that is neither a preposition/conjunction nor a pronoun."""
     if not choices or len(choices) < 4:
         return False
     first_words = []
@@ -1052,25 +1054,23 @@ def _choices_have_same_first_word(choices: list) -> bool:
         if not words:
             return False
         fw = words[0]
-        # Skip leading articles
         if fw in ("a", "an", "the") and len(words) > 1:
             fw = words[1]
         first_words.append(fw)
     if len(set(first_words)) != 1 or not first_words[0]:
         return False
-    # Allow prepositions/conjunctions — they legitimately start clause fragments
     if first_words[0] in _PREPOSITION_STARTERS:
         return False
-    # Fix-55: allow pronouns — Jaccard check handles semantic dupes
     if first_words[0] in _PRONOUN_STARTERS:
+        return False
+    if first_words[0] in _QUESTION_WORD_STARTERS:
         return False
     logger.info("MCQ rejected: all choices start with same noun: %r", first_words[0])
     return True
 
 
 # =====================================================
-# Fix-54 (v4.12): SEMANTIC DUPLICATE CHOICES
-# Content-word threshold lowered from > 4 to > 3 chars.
+# SEMANTIC DUPLICATE CHOICES
 # =====================================================
 _SEM_DUP_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
@@ -1086,10 +1086,8 @@ def _has_semantic_duplicate_choices(choices: list) -> bool:
 
     def _content(text: str) -> set:
         t = _SEM_DUP_SW.sub(" ", text.lower())
-        # Fix-54: threshold lowered to > 3 (4+ chars) to include "role", "user", "data"
         return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 3}
 
-    # same-first-word check (pronouns now exempt — see Fix-55)
     if _choices_have_same_first_word(choices):
         return True
 
@@ -1154,8 +1152,115 @@ def _is_valid_blank_completion(q: dict) -> bool:
         return False
     return True
 
+
 # =====================================================
-# Fix-44 (v4.11) + Fix-49 (v4.12): TERM-DEFINITION REJECTION
+# JUNK DISTRACTOR GUARD
+# =====================================================
+_JUNK_DISTRACTOR_RE = re.compile(
+    r'\b(color (theme|of)|desk space|cable connection|count.*cable|'
+    r'color.*icon|icon.*color|physical.*space|measuring.*space|'
+    r'checking.*color|counting.*cable|counting.*wire)\b',
+    re.IGNORECASE
+)
+
+def _has_junk_distractors(choices: list) -> bool:
+    if not choices:
+        return False
+    bad = [c for c in choices if _JUNK_DISTRACTOR_RE.search(c or "")]
+    if bad:
+        logger.info("MCQ rejected: junk/absurd distractor detected: %r", bad[0][:80])
+        return True
+    return False
+
+
+# =====================================================
+# JUNK ANSWER_TEXT TEMPLATE GUARD
+# =====================================================
+_JUNK_ANSWER_TEXT_RE = re.compile(
+    r'best (aligns? with|represents?) the principles? of .{3,60} at the \w+ level\b|'
+    r'is (the )?correct because it best (aligns?|represents?)\b',
+    re.IGNORECASE
+)
+
+def _has_junk_answer_text(answer_text: str) -> bool:
+    if not answer_text:
+        return False
+    if _JUNK_ANSWER_TEXT_RE.search(answer_text):
+        logger.info("MCQ rejected: junk answer_text template: %r", answer_text[:80])
+        return True
+    return False
+
+
+# =====================================================
+# CIRCULAR CHOICE DETECTION
+# =====================================================
+_CIRC_SW = re.compile(
+    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|it|'
+    r'that|this|with|as|from|they|their|you|when|what|how|why|which|'
+    r'does|do|can|will|would|describe|explain|happens?|encounter)\b',
+    re.IGNORECASE
+)
+
+def _has_circular_choice(question: str, choices: list) -> bool:
+    if not question or not choices:
+        return False
+
+    def _keywords(text: str) -> frozenset:
+        t = _CIRC_SW.sub(" ", text.lower())
+        t = re.sub(r"[^\w\s]", " ", t)
+        return frozenset(w for w in t.split() if len(w) >= 4)
+
+    q_words = _keywords(question)
+    if not q_words:
+        return False
+
+    for choice in choices:
+        c_words = _keywords(choice or "")
+        if not c_words:
+            continue
+        union   = q_words | c_words
+        jaccard = len(q_words & c_words) / len(union) if union else 0.0
+        if jaccard >= 0.55:
+            logger.info(
+                "MCQ rejected: circular choice (J=%.2f) q=%r choice=%r",
+                jaccard, question[:60], (choice or "")[:60]
+            )
+            return True
+    return False
+
+
+# =====================================================
+# MCQ META-PHRASE BAN
+# =====================================================
+_MCQ_META_PHRASE_RE = re.compile(
+    r'\bin the context of (this scenario|this case|the scenario|the context|this)\b|'
+    r'\bin this (scenario|case)\b|'
+    r'\bin a scenario where\b|'
+    r'\bassuming that\b|'
+    r'\bgiven that .{5,60}(must|should|can|is|are|will|would)\b',
+    re.IGNORECASE
+)
+
+def _is_mcq_meta_phrase(question: str) -> bool:
+    return bool(_MCQ_META_PHRASE_RE.search(question or ""))
+
+
+# =====================================================
+# "BEHAVES UNDER LOAD" LAZY TEMPLATE BAN
+# =====================================================
+_MCQ_LAZY_QUESTION_RE = re.compile(
+    r'behaves? under (load|stress|pressure)\b|'
+    r'understand how .{3,60} behaves?\b|'
+    r'how .{3,60} (behaves?|performs?) (under|in a)\b',
+    re.IGNORECASE
+)
+
+def _is_mcq_lazy_question_template(question: str) -> bool:
+    return bool(_MCQ_LAZY_QUESTION_RE.search(question or ""))
+
+
+# =====================================================
+# TERM-DEFINITION REJECTION
 # =====================================================
 _TERM_DEF_QUESTION_RE = re.compile(
     r"^("
@@ -1163,7 +1268,12 @@ _TERM_DEF_QUESTION_RE = re.compile(
     r"what is (the term|a term) (used to|for|that)\b|"
     r"what (is|are) (the term|the definition of|the meaning of)\s|"
     r"which term (describes?|refers? to|identifies?|defines?|is used|best describes?|best refers?)\b|"
-    r"what term (describes?|refers? to|identifies?|is used)\b"
+    r"what term (describes?|refers? to|identifies?|is used)\b|"
+    r"define (the )?(term|concept|word|phrase|meaning of)\b|"
+    r"define [a-z].{2,50}\.$|"
+    r"define [a-z].{2,40}\?|"
+    r"explain (the meaning|what .{2,40}means)\b|"
+    r"what does .{2,60} (involve|consist of|entail|comprise)\b"
     r")",
     re.IGNORECASE
 )
@@ -1173,9 +1283,7 @@ def _is_term_definition_question(question: str) -> bool:
 
 
 # =====================================================
-# Fix-45 (v4.11): "WHICH STATEMENT BEST" REJECTION
-# Note: the rejection guard in _generate_single and
-# _is_valid_fallback_question exempts bloom == "Analyzing" (Fix-56 v4.13).
+# "WHICH STATEMENT BEST" REJECTION
 # =====================================================
 _WHICH_STMT_BEST_RE = re.compile(
     r"^which (statement|of the following statements?|option|answer)\s+"
@@ -1188,9 +1296,11 @@ _WHICH_STMT_BEST_RE = re.compile(
 def _is_which_statement_best(question: str) -> bool:
     return bool(_WHICH_STMT_BEST_RE.match(question or ""))
 
+_WHICH_STMT_BEST_EXEMPT_BLOOMS = {"Analyzing", "Understanding"}
+
 
 # =====================================================
-# Fix-51 (v4.12): MCQ NEGATION IN QUESTION STEM
+# MCQ NEGATION IN QUESTION STEM
 # =====================================================
 _MCQ_NEGATION_STEM_RE = re.compile(
     r"\b(is not|are not|does not|do not|cannot|can't|doesn't|aren't|isn't|"
@@ -1200,15 +1310,26 @@ _MCQ_NEGATION_STEM_RE = re.compile(
 )
 
 def _is_mcq_negation_question(question: str) -> bool:
-    """Reject MCQ questions containing negation in the question stem."""
     return bool(_MCQ_NEGATION_STEM_RE.search(question or ""))
 
 
 # =====================================================
-# Fix-52 (v4.12): MCQ "HOW DOES" OPENER — PER-CONCEPT CAP
+# MCQ "HOW DOES/WILL" OPENER — HARD BAN
+# =====================================================
+_MCQ_HOW_DOES_BAN_RE = re.compile(
+    r"^how (does|do|is|are|can|will)\b",
+    re.IGNORECASE
+)
+
+def _is_mcq_how_does_opener(question: str) -> bool:
+    return bool(_MCQ_HOW_DOES_BAN_RE.match((question or "").strip()))
+
+
+# =====================================================
+# MCQ OPENER CATEGORISATION & CAPPING
 # =====================================================
 _MCQ_OPENER_CATEGORY_RE = re.compile(
-    r"^(how does|how do|how is|how are|how can|how would|how will|how should|how could|"
+    r"^(how (does|do|is|are|can|would|will|should|could)|"
     r"which of the following|"
     r"what is|what are|what was|"
     r"why is|why are|why does|why do|"
@@ -1221,21 +1342,29 @@ _MCQ_OPENER_CATEGORY_RE = re.compile(
     re.IGNORECASE
 )
 
-# Openers that trigger the per-concept cap (max 1 per concept)
-_MCQ_CAPPED_OPENERS = {"how", "which_of"}
+_MCQ_CAPPED_OPENERS = {
+    "which_of",
+    "what_is_purpose",
+    "how_would_describe",
+}
 
 def _extract_mcq_opener(question: str) -> str:
-    """Extract a normalized opener category from an MCQ question."""
     q = (question or "").strip().lower()
     m = _MCQ_OPENER_CATEGORY_RE.match(q)
     if not m:
         return "other"
     raw = m.group(1).lower()
     if raw.startswith("how"):
+        q_lower = (question or "").strip().lower()
+        if re.match(r'^how would you (describe|explain|summarize|outline|characterize)\b', q_lower):
+            return "how_would_describe"
         return "how"
     if raw.startswith("which of"):
         return "which_of"
     if raw.startswith("what is") or raw.startswith("what are") or raw.startswith("what was"):
+        q_lower = (question or "").strip().lower()
+        if re.search(r'\b(primary|main|key|core)\s+(purpose|goal|aim|role|function)\b', q_lower):
+            return "what_is_purpose"
         return "what_is"
     if raw.startswith("why"):
         return "why"
@@ -1254,15 +1383,13 @@ def _is_mcq_opener_overused(
     seen_mcq_openers: Dict[str, Dict[str, int]],
     mcq_opener_lock: threading.Lock,
 ) -> bool:
-    """Return True if this opener has reached its per-concept cap."""
     concept = (candidate_q.get("concept") or "").lower().strip()
     opener  = _extract_mcq_opener(candidate_q.get("question") or "")
     if opener not in _MCQ_CAPPED_OPENERS:
         return False
-    limit = 1  # max 1 of each capped opener per concept
     with mcq_opener_lock:
         counts = seen_mcq_openers.get(concept, {})
-        return counts.get(opener, 0) >= limit
+        return counts.get(opener, 0) >= 1
 
 def _register_mcq_opener(
     candidate_q: dict,
@@ -1281,24 +1408,28 @@ def _mcq_opener_hint(
     seen_mcq_openers: Dict[str, Dict[str, int]],
     mcq_opener_lock: threading.Lock,
 ) -> str:
-    """Return an attempt-note hint if capped openers are saturated for this concept."""
     with mcq_opener_lock:
         counts = seen_mcq_openers.get(concept.lower().strip(), {})
     notes = []
-    if counts.get("how", 0) >= 1:
-        notes.append(
-            "Do NOT start with 'How does'. Use instead: "
-            "'Why is X important?', 'What happens when X?', 'What role does X play?', 'In what way does X affect Y?'"
-        )
     if counts.get("which_of", 0) >= 1:
         notes.append(
             "Do NOT start with 'Which of the following'. Ask a specific question instead."
+        )
+    if counts.get("what_is_purpose", 0) >= 1:
+        notes.append(
+            "Do NOT ask 'What is the primary purpose'. "
+            "Instead ask about a specific component, scenario, or consequence."
+        )
+    if counts.get("how_would_describe", 0) >= 1:
+        notes.append(
+            "Do NOT use 'How would you describe/explain'. "
+            "Ask about a specific fact, mechanism, or real-world consequence instead."
         )
     return " ".join(notes)
 
 
 # =====================================================
-# Fix-53 (v4.12): MCQ SUB-TOPIC SATURATION
+# MCQ SUB-TOPIC SATURATION
 # =====================================================
 _MCQ_SUBTOPIC_SW = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
@@ -1306,6 +1437,7 @@ _MCQ_SUBTOPIC_SW = re.compile(
     r'does|do|can|will|may|has|have|been|being|they|their|such|each|used|'
     r'primarily|mainly|often|generally|usually|typically|between|among|'
     r'following|correctly|commonly|specifically|properly|typically|'
+    r'purpose|goal|aim|role|function|importance|benefit|feature|'
     r'given|provide|ensure|allow|make|help|support|affect|impact|cause)\b',
     re.IGNORECASE
 )
@@ -1314,7 +1446,6 @@ def _mcq_subtopic_words(question: str) -> frozenset:
     q = re.sub(r"[^\w\s]", " ", question.lower())
     q = _MCQ_SUBTOPIC_SW.sub(" ", q)
     q = re.sub(r"\s+", " ", q).strip()
-    # threshold: 4+ chars (includes "role", "user", "data")
     return frozenset(w for w in q.split() if len(w) >= 4)
 
 def _is_mcq_subtopic_saturated(
@@ -1358,7 +1489,7 @@ def _register_mcq_subtopic(
 
 
 # =====================================================
-# Fix-25: LAZY BLOOM OPENER VALIDATOR
+# LAZY BLOOM OPENER VALIDATOR
 # =====================================================
 _LAZY_BLOOM_OPENER_RE = re.compile(
     r"^(analyze|evaluate|assess|create|design|develop)\s+.{5,60}[:]\s*"
@@ -1450,7 +1581,7 @@ def _tf_balance_note(
     return ""
 
 # =====================================================
-# OPEN-ENDED BLOOM+CONCEPT TRACKER (Fix-48 v4.11)
+# OPEN-ENDED BLOOM+CONCEPT TRACKER
 # =====================================================
 _OPEN_STARTER_VERB_RE = re.compile(
     r"^(evaluate|assess|analyze|examine|compare|justify|critique|judge|"
@@ -1520,6 +1651,7 @@ _OPEN_PLACEHOLDERS = {
     "write answer here", "<complete model answer based on context>",
     "<write a complete model answer>",
     "<exactly 1 complete sentence answer based on context>",
+    "<exactly 2 complete sentences.>",
     "1 complete sentence answer based on context.",
 }
 
@@ -1536,11 +1668,9 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
     if display_type == "mcq":
         choices = q.get("choices") or []
         if not answer: return False
-
         if len(choices) != 4:
             logger.info("MCQ rejected: expected 4 choices, got %d", len(choices))
             return False
-
         for c in choices:
             if not c or not c.strip():
                 logger.info("MCQ rejected: empty choice detected")
@@ -1551,7 +1681,6 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
             if _MCQ_CHOICE_PLACEHOLDER_RE.match(c.strip()):
                 logger.info("MCQ rejected: placeholder choice: %r", c[:60])
                 return False
-
         choices_lower = [c.lower().strip() for c in choices]
         answer_lower  = answer.lower().strip()
         if answer_lower not in choices_lower:
@@ -1566,18 +1695,21 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
                     answer[:60], choices_lower
                 )
                 return False
-
         stripped = [c.lower().strip() for c in choices if c.strip()]
         if len(stripped) != len(set(stripped)):
             logger.info("MCQ rejected: duplicate choices detected %r", stripped)
             return False
-
         if _has_semantic_duplicate_choices(choices):
             return False
         if not _is_valid_blank_completion(q):
             return False
-
+        if _has_junk_distractors(choices):
+            return False
+        if _has_circular_choice(q.get("question", ""), choices):
+            return False
         answer_text_expl = clean_text(str(q.get("answer_text") or ""))
+        if answer_text_expl and _has_junk_answer_text(answer_text_expl):
+            return False
         if answer_text_expl and len(choices) >= 3:
             ans_idx = next(
                 (i for i, c in enumerate(choices)
@@ -1588,8 +1720,8 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
                 ans_letter = chr(ord("A") + ans_idx)
                 ok, _ = _answer_matches_explanation(ans_letter, choices, answer_text_expl)
                 if not ok:
-                    logger.info("MCQ rejected: answer doesn't match its own explanation "
-                                "(record answer=%r)", answer[:60])
+                    logger.info("MCQ rejected: answer doesn't match explanation "
+                                "(answer=%r)", answer[:60])
                     return False
         return True
 
@@ -1601,8 +1733,8 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
         if ans_low in _OPEN_PLACEHOLDERS: return False
         if re.match(r"^(model answer|answer\s*:)", ans_low): return False
         sentence_count = len(re.findall(r'(?<=[.!?])\s+[A-Z]', answer))
-        if sentence_count >= 2:
-            logger.info("Open-ended rejected: answer has %d+ sentences: %r",
+        if sentence_count >= 3:
+            logger.info("Open-ended rejected: answer has %d+ sentences (max 2): %r",
                         sentence_count + 1, answer[:80])
             return False
 
@@ -1610,7 +1742,7 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
 
 
 # =====================================================
-# Fix-46 (v4.11): TF CONTEXT-FRAMING REJECTION
+# TF CONTEXT-FRAMING REJECTION
 # =====================================================
 _TF_CONTEXT_FRAMING_RE = re.compile(
     r"^(in the context of\b|"
@@ -1673,51 +1805,49 @@ def _is_valid_tf(q: dict) -> bool:
 
 
 # =====================================================
-# Fix-49 (v4.12): FALLBACK QUALITY GATE
-# Fix-56 (v4.13): "which statement best" exempt for Analyzing bloom.
+# FALLBACK QUALITY GATE
 # =====================================================
 def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
-    """
-    Quality gate for dataset fallback questions.
-    Only the clearest violations are rejected to avoid inflating failures.
-    """
     qtext = (q.get("question") or "").strip()
     if not qtext or len(qtext) < 20:
         return False
-
-    # Always reject term-definition questions
     if _is_term_definition_question(qtext):
         logger.info("Fallback rejected: term-def question: %r", qtext[:70])
         return False
-
     if display_type == "mcq":
-        # Fix-56: "Which statement best" is allowed for Analyzing bloom
         _fb_bloom = (q.get("bloom") or "").strip()
-        if _is_which_statement_best(qtext) and _fb_bloom not in ("Analyzing",):
+        if _is_which_statement_best(qtext) and _fb_bloom not in _WHICH_STMT_BEST_EXEMPT_BLOOMS:
             logger.info("Fallback rejected: which-statement-best (bloom=%s): %r",
                         _fb_bloom, qtext[:70])
             return False
-        # Reject negation in stem
         if _is_mcq_negation_question(qtext):
             logger.info("Fallback rejected: negation in MCQ stem: %r", qtext[:70])
+            return False
+        if _is_mcq_how_does_opener(qtext):
+            logger.info("Fallback rejected: how-does opener: %r", qtext[:70])
+            return False
+        if _is_mcq_meta_phrase(qtext):
+            logger.info("Fallback rejected: meta-phrase in MCQ stem: %r", qtext[:60])
+            return False
+        if _is_mcq_lazy_question_template(qtext):
+            logger.info("Fallback rejected: lazy-template in MCQ stem: %r", qtext[:60])
             return False
         choices = q.get("choices") or []
         if len(choices) != 4:
             return False
-        # Reject same-first-word choices (pronouns now exempt — Fix-55)
         if _choices_have_same_first_word(choices):
-            logger.info("Fallback rejected: same-first-word choices for: %r", qtext[:60])
+            logger.info("Fallback rejected: same-first-word choices: %r", qtext[:60])
             return False
-        answer = (q.get("answer") or "").strip()
-        if not answer:
+        answer_text_fb = clean_text(str(q.get("answer_text") or ""))
+        if answer_text_fb and _has_junk_answer_text(answer_text_fb):
+            logger.info("Fallback rejected: junk answer_text template: %r", qtext[:60])
             return False
-
+        if not (q.get("answer") or "").strip():
+            return False
     elif display_type == "truefalse":
-        # Apply full TF validation (includes context-framing check)
         if not _is_valid_tf(q):
             logger.info("Fallback rejected: invalid TF: %r", qtext[:70])
             return False
-
     return True
 
 
@@ -1754,7 +1884,6 @@ def _generate_single(
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         temp = min(0.80, 0.45 + 0.175 * (attempt - 1))
-
         attempt_note = _RETRY_NOTES[min(attempt - 1, len(_RETRY_NOTES) - 1)]
 
         if prompt_type == "tf" and seen_tf_by_concept is not None and tf_concept_lock is not None:
@@ -1771,7 +1900,6 @@ def _generate_single(
             if diversity:
                 attempt_note = f"{attempt_note} {diversity}".strip() if attempt_note else diversity
 
-        # Fix-52 (v4.12): pre-generation opener hint for MCQ
         if prompt_type == "mcq" and seen_mcq_openers is not None and mcq_opener_lock is not None:
             opener_hint = _mcq_opener_hint(topic, seen_mcq_openers, mcq_opener_lock)
             if opener_hint:
@@ -1797,7 +1925,7 @@ def _generate_single(
             time.sleep(0.05 * attempt)
             continue
 
-        # Fix-44/49: reject term-definition questions
+        # Term-definition check
         if _is_term_definition_question(qtext):
             concept_key = concept_lc
             bloom_lower = bloom.lower()
@@ -1816,15 +1944,23 @@ def _generate_single(
                 avoid_list = avoid_list[-3:]
                 time.sleep(0.05 * attempt); continue
 
-        # Fix-45 / Fix-56: reject "Which statement best..." except for Analyzing bloom
-        if _is_which_statement_best(qtext) and bloom not in ("Analyzing",):
+        # "Which statement best" exempt for Analyzing and Understanding
+        if _is_which_statement_best(qtext) and bloom not in _WHICH_STMT_BEST_EXEMPT_BLOOMS:
             logger.info("Rejected 'which statement best' record=%d bloom=%s q=%r",
                         record_idx, bloom, qtext[:70])
             avoid_list.append(qtext[:25])
             avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # Fix-51 (v4.12): reject MCQ negation in question stem
+        # Hard-ban "how does/do/is/are/can/will"
+        if display_type == "mcq" and _is_mcq_how_does_opener(qtext):
+            logger.info("MCQ rejected: how-does opener record=%d q=%r",
+                        record_idx, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # MCQ negation in stem
         if display_type == "mcq" and _is_mcq_negation_question(qtext):
             logger.info("MCQ rejected: negation in stem record=%d q=%r",
                         record_idx, qtext[:70])
@@ -1832,7 +1968,23 @@ def _generate_single(
             avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # Fix-52 (v4.12): MCQ opener overuse check
+        # MCQ meta-phrase ban
+        if display_type == "mcq" and _is_mcq_meta_phrase(qtext):
+            logger.info("MCQ rejected: meta-phrase in stem record=%d q=%r",
+                        record_idx, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # "behaves under load" lazy template ban
+        if display_type == "mcq" and _is_mcq_lazy_question_template(qtext):
+            logger.info("MCQ rejected: lazy-template record=%d q=%r",
+                        record_idx, qtext[:70])
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt); continue
+
+        # MCQ opener overuse
         if (display_type == "mcq" and
                 seen_mcq_openers is not None and mcq_opener_lock is not None):
             if _is_mcq_opener_overused(candidate_q, seen_mcq_openers, mcq_opener_lock):
@@ -1842,14 +1994,14 @@ def _generate_single(
                 avoid_list = avoid_list[-3:]
                 time.sleep(0.05 * attempt); continue
 
-        # Fix-25: reject lazy bloom opener
+        # Lazy bloom opener
         if _is_lazy_bloom_opener(qtext):
             logger.info("Rejected lazy bloom opener record=%d q=%r", record_idx, qtext[:70])
             avoid_list.append(qtext[:25])
             avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # Fix-37: MCQ Bloom-level question-starter check
+        # MCQ Bloom-level starter check
         if display_type == "mcq" and not _is_valid_mcq_bloom_pattern(qtext, bloom):
             logger.info(
                 "MCQ rejected: Bloom starter mismatch level=%s record=%d q=%r",
@@ -1864,7 +2016,7 @@ def _generate_single(
             if not _is_valid_tf(candidate_q):
                 time.sleep(0.05 * attempt); continue
 
-        # Fix-48: open-ended verb diversity check
+        # Open-ended verb diversity
         if display_type == "open_ended" and seen_open_combos is not None and open_combos_lock is not None:
             verb     = _extract_open_starter_verb(qtext)
             verb_key = f"{_open_bloom_concept_key(topic, bloom)}::verb"
@@ -1880,7 +2032,7 @@ def _generate_single(
                         avoid_list = avoid_list[-3:]
                         time.sleep(0.05 * attempt); continue
 
-        # Fix-53 (v4.12): MCQ sub-topic saturation check
+        # MCQ sub-topic saturation
         if (display_type == "mcq" and
                 seen_mcq_by_concept is not None and mcq_concept_lock is not None):
             if _is_mcq_subtopic_saturated(candidate_q, seen_mcq_by_concept, mcq_concept_lock):
@@ -1938,7 +2090,7 @@ def _generate_single(
             avoid_list = avoid_list[-3:]
             time.sleep(0.05 * attempt); continue
 
-        # ── All checks passed — register state ──────────────────────────
+        # ── All checks passed ────────────────────────────────────────────
         if display_type == "truefalse" and seen_tf_by_concept is not None:
             _register_tf_question(candidate_q, seen_tf_by_concept, tf_concept_lock)
 
@@ -1963,6 +2115,15 @@ def _generate_single(
 # BATCH GENERATOR
 # =====================================================
 def generate_from_records(records, max_items=None):
+    # ── Fix-78: warn immediately if the caller sent fewer records than expected ──
+    if max_items is not None and len(records) < max_items:
+        logger.warning(
+            "WARNING Fix-78: received %d records but max_items=%d — "
+            "likely a frontend off-by-one in TOS→records conversion. "
+            "Expected range(start, end+1) not range(start, end).",
+            len(records), max_items,
+        )
+
     limit = min(len(records), max_items) if max_items else len(records)
 
     topic_slot_counter: Dict[str, List[int]] = {}
@@ -2005,7 +2166,6 @@ def generate_from_records(records, max_items=None):
                       "prompt_type": prompt_type, "display_type": display_type,
                       "context": context, "record": rec})
 
-    # ── Shared dedup / tracking state ───────────────────────────────────
     _fp_lock        = threading.Lock()
     _answer_fp_lock = threading.Lock()
     _stems_lock     = threading.Lock()
@@ -2023,7 +2183,6 @@ def generate_from_records(records, max_items=None):
     _term_def_lock: threading.Lock = threading.Lock()
     seen_term_defs: Dict[str, int] = {}
 
-    # Fix-52/53 (v4.12): MCQ-specific trackers
     _mcq_concept_lock: threading.Lock = threading.Lock()
     seen_mcq_by_concept: Dict[str, List[frozenset]] = {}
 
@@ -2076,12 +2235,34 @@ def generate_from_records(records, max_items=None):
     logger.info("Generating %d questions with %d worker(s)", len(slots), workers)
     slot_start = time.time()
 
+    # results[i] starts as None; the safety net below (Fix-77) fills any that
+    # remain None after the executor block — guaranteeing len(results)==len(slots).
     results: List[Optional[tuple]] = [None] * len(slots)
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
         future_map = {executor.submit(_run_slot, slot): i for i, slot in enumerate(slots)}
         for future in as_completed(future_map):
-            orig_i, slot, q = future.result()
-            results[orig_i] = (slot, q)
+            # ── Fix-76: catch per-worker exceptions so one crash can't ──
+            # ── silently wipe the entire results list                  ──
+            try:
+                orig_i, slot, q = future.result()
+                results[orig_i] = (slot, q)
+            except Exception as exc:
+                orig_i = future_map[future]
+                logger.error(
+                    "Fix-76: worker crashed for slot %d — storing None and continuing. "
+                    "Error: %s", orig_i, exc
+                )
+                # results[orig_i] stays None; Fix-77 safety net handles it below
+
+    # ── Fix-77: safety net — fill any None slots left by crashed workers ──
+    for i, res in enumerate(results):
+        if res is None:
+            logger.warning(
+                "Fix-77: slot %d has no result (worker crashed or was never scheduled) "
+                "— filling with placeholder.", i
+            )
+            results[i] = (slots[i], None)
 
     elapsed = time.time() - slot_start
     logger.info("All %d questions generated in %.1fs (%.1f s/q avg)",
@@ -2095,7 +2276,6 @@ def generate_from_records(records, max_items=None):
         if q is not None:
             out_questions.append(q)
         else:
-            # ── Fix-49 (v4.12): validate dataset fallback before using ──
             rec      = slot["record"]
             fallback = rec.get("output") if isinstance(rec, dict) else None
             used_fallback = False
@@ -2159,7 +2339,7 @@ def load_jsonl(path):
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(title="AutoTOS AI Service", version="4.13-ollama")
+app = FastAPI(title="AutoTOS AI Service", version="4.18-ollama")
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
 
@@ -2179,7 +2359,7 @@ async def health():
             "ollama_model":       OLLAMA_MODEL,
             "chunk_size":         CHUNK_SIZE,
             "generation_workers": GENERATION_WORKERS,
-            "version":            "4.13"}
+            "version":            "4.18"}
 
 @app.get("/cache_stats")
 async def cache_stats():
@@ -2203,6 +2383,13 @@ async def extract_text(req: ExtractRequest):
 async def generate(req: GenerateRequest):
     if not req.records:
         raise HTTPException(status_code=400, detail="records must be non-empty")
+    # Fix-78: surface frontend off-by-one in logs
+    if req.max_items is not None and len(req.records) < req.max_items:
+        logger.warning(
+            "Fix-78 /generate: got %d records but max_items=%d — "
+            "check frontend TOS→records range construction.",
+            len(req.records), req.max_items,
+        )
     try:
         resp = await run_in_threadpool(
             lambda: generate_quiz_for_topics(req.records, max_items=req.max_items,
@@ -2214,6 +2401,13 @@ async def generate(req: GenerateRequest):
 
 @app.post("/generate_from_records")
 async def generate_from_records_endpoint(payload: GenerateRequest):
+    # Fix-78: surface frontend off-by-one in logs
+    if payload.max_items is not None and len(payload.records) < payload.max_items:
+        logger.warning(
+            "Fix-78 /generate_from_records: got %d records but max_items=%d — "
+            "check frontend TOS→records range construction.",
+            len(payload.records), payload.max_items,
+        )
     try:
         out = await run_in_threadpool(
             lambda: generate_from_records(payload.records, max_items=payload.max_items))
