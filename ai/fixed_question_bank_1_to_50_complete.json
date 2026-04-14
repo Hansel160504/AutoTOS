@@ -1,0 +1,622 @@
+[
+  {
+    "item_number": 1,
+    "topic": "Firewalls",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What is the primary purpose of a firewall?",
+    "choices": [
+      "To speed up internet traffic",
+      "To monitor and control network traffic based on rules",
+      "To store user files",
+      "To create passwords"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because a firewall controls incoming and outgoing traffic based on security rules."
+  },
+  {
+    "item_number": 2,
+    "topic": "Firewalls",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "How does a firewall help protect a network from unauthorized access?",
+    "choices": [
+      "By deleting all files",
+      "By blocking or allowing traffic using security rules",
+      "By turning off the internet",
+      "By changing monitor settings"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because firewalls filter traffic using predefined rules to allow or block access."
+  },
+  {
+    "item_number": 3,
+    "topic": "Firewalls",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "Which type of firewall checks traffic at the application layer?",
+    "choices": [
+      "Packet-filtering firewall",
+      "Stateful inspection firewall",
+      "Application-layer firewall",
+      "Backup firewall"
+    ],
+    "answer": "C",
+    "answer_text": "It is correct because application-layer firewalls inspect data at the application level."
+  },
+  {
+    "item_number": 4,
+    "topic": "Firewalls",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "What is the difference between packet-filtering firewalls and stateful inspection firewalls?",
+    "choices": [
+      "Packet-filtering inspects connection state; stateful does not",
+      "Packet-filtering checks packet headers while stateful tracks active connections",
+      "Both are identical",
+      "Stateful only changes passwords"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because stateful firewalls monitor active sessions while packet filtering only checks headers."
+  },
+  {
+    "item_number": 5,
+    "topic": "Firewalls",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What does a next-generation firewall add to traditional firewall protection?",
+    "choices": [
+      "Deep packet inspection and intrusion prevention",
+      "Only file compression",
+      "Only screen filtering",
+      "No security rules at all"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because next-generation firewalls include advanced features like deep packet inspection."
+  },
+  {
+    "item_number": 6,
+    "topic": "Evolution of Computers",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What device used sliding beads to perform calculations?",
+    "choices": [
+      "Pascaline",
+      "Abacus",
+      "ENIAC",
+      "Z1"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because the abacus uses beads to represent numbers for calculation."
+  },
+  {
+    "item_number": 7,
+    "topic": "Evolution of Computers",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "How did Napier’s Bones help users solve mathematical problems?",
+    "choices": [
+      "By printing charts",
+      "By helping with multiplication, division, and roots",
+      "By storing internet data",
+      "By drawing diagrams"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because Napier’s Bones simplifies multiplication and division processes."
+  },
+  {
+    "item_number": 8,
+    "topic": "Evolution of Computers",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "Which inventor created the Pascaline?",
+    "choices": [
+      "John Napier",
+      "Blaise Pascal",
+      "Charles Babbage",
+      "Konrad Zuse"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because Blaise Pascal invented the Pascaline calculator."
+  },
+  {
+    "item_number": 9,
+    "topic": "Evolution of Computers",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "Why was the Analytical Engine considered an important step in computer history?",
+    "choices": [
+      "It used punch cards and could be programmed",
+      "It was the first laptop",
+      "It replaced all modern computers",
+      "It was used only for gaming"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because it introduced the concept of programmable machines."
+  },
+  {
+    "item_number": 10,
+    "topic": "Evolution of Computers",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What was the first programmable computer created by Konrad Zuse?",
+    "choices": [
+      "Z1",
+      "ENIAC",
+      "UNIVAC 1",
+      "Mark I"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because Z1 was the first programmable mechanical computer."
+  },
+  {
+    "item_number": 11,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What does transparency mean in data privacy law?",
+    "choices": [
+      "Hiding data practices from users",
+      "Clearly informing users about data collection practices",
+      "Deleting all data immediately",
+      "Sharing data freely"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because transparency means informing users clearly about data collection and use."
+  },
+  {
+    "item_number": 12,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "Why is legitimate purpose important when collecting personal data?",
+    "choices": [
+      "It allows any use of data",
+      "It ensures data is collected for a specific, legal purpose",
+      "It removes the need for consent",
+      "It makes data public"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because legitimate purpose limits data collection to lawful and specific reasons."
+  },
+  {
+    "item_number": 13,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What right allows a person to request a copy of their personal data?",
+    "choices": [
+      "Right to access",
+      "Right to erasure",
+      "Right to object",
+      "Right to ignore"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because the right to access lets a person request their personal data."
+  },
+  {
+    "item_number": 14,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "How does the right to erasure protect data subjects?",
+    "choices": [
+      "It allows deletion of personal data when requested",
+      "It shares data with advertisers",
+      "It blocks internet access",
+      "It duplicates files"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because the right to erasure allows deletion of personal data upon request."
+  },
+  {
+    "item_number": 15,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What role does a Data Protection Officer play in an organization?",
+    "choices": [
+      "Oversees privacy compliance",
+      "Designs computer games",
+      "Repairs hardware",
+      "Writes social media posts"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because a Data Protection Officer helps ensure privacy compliance."
+  },
+  {
+    "item_number": 16,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What are emerging trends?",
+    "choices": [
+      "Old technologies no longer used",
+      "New developments influencing industries, technology, and society",
+      "Only computer viruses",
+      "Paper-based systems"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because emerging trends are new developments that affect technology and society."
+  },
+  {
+    "item_number": 17,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "How do technological advancements drive emerging trends?",
+    "choices": [
+      "By slowing innovation",
+      "By creating new tools and opportunities",
+      "By removing all change",
+      "By preventing automation"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because technological progress creates new tools, methods, and opportunities."
+  },
+  {
+    "item_number": 18,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What does IoT stand for?",
+    "choices": [
+      "Internet of Technology",
+      "Internal Online Transfer",
+      "Internet of Things",
+      "Independent Operating Tools"
+    ],
+    "answer": "C",
+    "answer_text": "It is correct because IoT stands for Internet of Things."
+  },
+  {
+    "item_number": 19,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "Why is lack of encryption a security risk for IoT devices?",
+    "choices": [
+      "It protects data better",
+      "It can expose data to unauthorized access",
+      "It makes devices faster",
+      "It improves passwords automatically"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because unencrypted data can be read by unauthorized users."
+  },
+  {
+    "item_number": 20,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What is cloud security?",
+    "choices": [
+      "Protection of data, applications, and infrastructure in cloud computing",
+      "A type of keyboard",
+      "A method of printing files",
+      "A wireless mouse feature"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because cloud security protects cloud-based data, apps, and infrastructure."
+  },
+  {
+    "item_number": 21,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What is cyber security?",
+    "choices": [
+      "The practice of securing computer systems and networks from unauthorized access or damage",
+      "A way to make computers larger",
+      "A type of file format",
+      "A social media app"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because cyber security protects systems and networks from threats."
+  },
+  {
+    "item_number": 22,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "Why is cyber security important for protecting sensitive data?",
+    "choices": [
+      "It helps prevent theft, loss, and unauthorized access",
+      "It makes files smaller",
+      "It replaces the internet",
+      "It removes the need for updates"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because cyber security helps stop data theft and unauthorized access."
+  },
+  {
+    "item_number": 23,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What is phishing?",
+    "choices": [
+      "A fake email or message used to trick users into revealing information",
+      "A device for storing files",
+      "A backup process",
+      "A password manager"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because phishing tricks users into sharing private information."
+  },
+  {
+    "item_number": 24,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Understanding",
+    "type": "mcq",
+    "question": "How does ransomware affect a computer or organization?",
+    "choices": [
+      "It encrypts files and demands payment",
+      "It speeds up downloads",
+      "It improves security logs",
+      "It creates extra memory"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because ransomware locks files and asks for payment to restore access."
+  },
+  {
+    "item_number": 25,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Remembering",
+    "type": "mcq",
+    "question": "What does multi-factor authentication add to account protection?",
+    "choices": [
+      "An extra layer of security",
+      "More advertisements",
+      "Less control",
+      "A larger screen"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because multi-factor authentication adds another security step."
+  },
+  {
+    "item_number": 26,
+    "topic": "Firewalls",
+    "bloom": "Applying",
+    "type": "mcq",
+    "question": "A school wants to block unsafe websites but allow approved learning sites. What firewall action should it use?",
+    "choices": [
+      "Disable all rules",
+      "Use proper filtering rules",
+      "Open all ports",
+      "Turn off the firewall"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because filtering rules let the school allow safe sites and block risky ones."
+  },
+  {
+    "item_number": 27,
+    "topic": "Firewalls",
+    "bloom": "Analyzing",
+    "type": "mcq",
+    "question": "How would you compare a basic firewall and a stateful firewall in terms of traffic inspection?",
+    "choices": [
+      "Basic firewalls track active connections; stateful does not",
+      "Stateful firewalls track active connections while basic packet filtering checks headers",
+      "They are identical",
+      "Neither inspects traffic"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because stateful firewalls track sessions while basic firewalls inspect packet headers."
+  },
+  {
+    "item_number": 28,
+    "topic": "Firewalls",
+    "bloom": "Applying",
+    "type": "mcq",
+    "question": "If a company needs deeper inspection of web traffic, which firewall type should it choose?",
+    "choices": [
+      "Application-layer firewall",
+      "Basic printer firewall",
+      "Offline storage firewall",
+      "Unfiltered router"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because application-layer firewalls inspect traffic more deeply."
+  },
+  {
+    "item_number": 29,
+    "topic": "Evolution of Computers",
+    "bloom": "Applying",
+    "type": "mcq",
+    "question": "If a student wants to explain how transistors improved computers, what key changes should be mentioned?",
+    "choices": [
+      "Smaller size, faster speed, and less heat",
+      "More paper usage",
+      "Slower calculations only",
+      "Manual bead counting"
+    ],
+    "answer": "A",
+    "answer_text": "It is correct because transistors made computers smaller, faster, and cooler."
+  },
+  {
+    "item_number": 30,
+    "topic": "Evolution of Computers",
+    "bloom": "Analyzing",
+    "type": "mcq",
+    "question": "How did the shift from machine language to assembly language improve programming?",
+    "choices": [
+      "It made programs more difficult to read",
+      "It replaced binary with easier symbolic instructions",
+      "It removed the need for computers",
+      "It caused programs to disappear"
+    ],
+    "answer": "B",
+    "answer_text": "It is correct because assembly language uses easier symbols instead of raw binary."
+  },
+  {
+    "item_number": 31,
+    "topic": "Evolution of Computers",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "The stored-program concept allowed both data and instructions to be stored in memory.",
+    "answer": "True",
+    "answer_text": "The statement is true because the stored-program concept keeps both data and instructions in memory."
+  },
+  {
+    "item_number": 32,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "Collecting only the necessary data follows the principle of proportionality.",
+    "answer": "True",
+    "answer_text": "The statement is true because proportionality requires collecting only relevant and necessary data."
+  },
+  {
+    "item_number": 33,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Analyzing",
+    "type": "truefalse",
+    "question": "The right to data portability allows a person to transfer their data to another service provider.",
+    "answer": "True",
+    "answer_text": "The statement is true because data portability means moving personal data to another provider."
+  },
+  {
+    "item_number": 34,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "Strong authentication and encryption can help reduce IoT security risks.",
+    "answer": "True",
+    "answer_text": "The statement is true because authentication and encryption both help protect IoT devices and data."
+  },
+  {
+    "item_number": 35,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Analyzing",
+    "type": "truefalse",
+    "question": "Cloud security only matters when data is stored offline.",
+    "answer": "False",
+    "answer_text": "The statement is false because cloud security is needed when data is stored and processed online."
+  },
+  {
+    "item_number": 36,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "Multi-factor authentication adds an extra layer of protection to accounts.",
+    "answer": "True",
+    "answer_text": "The statement is true because multi-factor authentication strengthens account security."
+  },
+  {
+    "item_number": 37,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Analyzing",
+    "type": "truefalse",
+    "question": "Phishing often uses fake emails or messages to trick users into revealing information.",
+    "answer": "True",
+    "answer_text": "The statement is true because phishing relies on deception to steal information."
+  },
+  {
+    "item_number": 38,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "A denial-of-service attack is designed to make a website unavailable or slow.",
+    "answer": "True",
+    "answer_text": "The statement is true because a DoS attack floods a service to disrupt access."
+  },
+  {
+    "item_number": 39,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Analyzing",
+    "type": "truefalse",
+    "question": "Keeping software updated can help reduce cyber vulnerabilities.",
+    "answer": "True",
+    "answer_text": "The statement is true because updates often fix known security weaknesses."
+  },
+  {
+    "item_number": 40,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Applying",
+    "type": "truefalse",
+    "question": "Sharing one password with everyone is a secure cyber practice.",
+    "answer": "False",
+    "answer_text": "The statement is false because shared passwords weaken security and accountability."
+  },
+  {
+    "item_number": 41,
+    "topic": "Firewalls",
+    "bloom": "Evaluating",
+    "type": "open_ended",
+    "question": "Which firewall strategy is most effective for a company that handles confidential data, and why?",
+    "answer": "A layered firewall strategy with strong filtering and regular rule updates is most effective because it better controls traffic and reduces unauthorized access."
+  },
+  {
+    "item_number": 42,
+    "topic": "Firewalls",
+    "bloom": "Creating",
+    "type": "open_ended",
+    "question": "Design a simple firewall policy for a computer laboratory.",
+    "answer": "Allow only approved learning sites and block risky traffic. Log suspicious activity and review the rules regularly."
+  },
+  {
+    "item_number": 43,
+    "topic": "Evolution of Computers",
+    "bloom": "Evaluating",
+    "type": "open_ended",
+    "question": "Which invention had the greatest impact on the development of modern computers: the Abacus, Pascaline, or Analytical Engine? Explain briefly.",
+    "answer": "The Analytical Engine had the greatest impact because it introduced programmable ideas and mechanical memory, which influenced later computer designs."
+  },
+  {
+    "item_number": 44,
+    "topic": "Evolution of Computers",
+    "bloom": "Creating",
+    "type": "open_ended",
+    "question": "Create a short timeline showing three major milestones in the evolution of computers.",
+    "answer": "One timeline could include the Abacus, the Analytical Engine, and the first transistorized computers. These show the shift from manual tools to programmable and smaller electronic systems."
+  },
+  {
+    "item_number": 45,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Evaluating",
+    "type": "open_ended",
+    "question": "Which is more important in protecting user data: transparency or data minimization? Explain briefly.",
+    "answer": "Both are important, but data minimization is especially powerful because collecting less data reduces risk. Transparency still matters because users must understand how their data is handled."
+  },
+  {
+    "item_number": 46,
+    "topic": "Essentials of Data Privacy Law",
+    "bloom": "Creating",
+    "type": "open_ended",
+    "question": "Write one privacy rule that a school should follow when collecting student data.",
+    "answer": "The school should collect only the information needed for a clear and lawful purpose. It should also protect the data and explain how it will be used."
+  },
+  {
+    "item_number": 47,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Evaluating",
+    "type": "open_ended",
+    "question": "Which is the bigger security concern for IoT: weak authentication or insecure network services? Explain briefly.",
+    "answer": "Weak authentication is often the bigger concern because it makes it easier for attackers to gain access. Insecure network services are also risky, but strong authentication is a first defense."
+  },
+  {
+    "item_number": 48,
+    "topic": "Emerging Trends, IoT, and Cloud Security",
+    "bloom": "Creating",
+    "type": "open_ended",
+    "question": "Propose one practical way to improve cloud security in a small organization.",
+    "answer": "Use strong access controls, encryption, and regular security audits. The organization should also monitor activity and update systems often."
+  },
+  {
+    "item_number": 49,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Evaluating",
+    "type": "open_ended",
+    "question": "Which is more damaging to a business: phishing or ransomware? Explain briefly.",
+    "answer": "Ransomware can be more damaging because it can lock files and stop operations immediately. Phishing is dangerous too because it can lead to stolen credentials and other attacks."
+  },
+  {
+    "item_number": 50,
+    "topic": "Cyber Security in Modern Society",
+    "bloom": "Creating",
+    "type": "open_ended",
+    "question": "Create a simple cyber safety guideline that employees should follow every day.",
+    "answer": "Employees should use strong unique passwords, avoid suspicious links, and report unusual activity immediately. They should also update software and use multi-factor authentication."
+  }
+]

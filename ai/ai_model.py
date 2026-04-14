@@ -36,41 +36,17 @@
 #       Fix-75 – _mcq_opener_hint indentation fixed.
 #
 # v4.18  (Item-count guarantee — BUG FIXES)
-#       Fix-76 – ThreadPoolExecutor future.result() wrapped in try/except so a
-#                single worker crash no longer silently wipes ALL results.
-#       Fix-77 – Safety net after executor block fills any remaining None slots
-#                with placeholders, guaranteeing len(out)==len(records_sent).
-#       Fix-78 – /generate and /generate_from_records endpoints now emit a
-#                WARNING when len(records) < max_items so frontend off-by-one
-#                bugs in TOS→records conversion are immediately visible in logs.
+#       Fix-76 – ThreadPoolExecutor future.result() wrapped in try/except.
+#       Fix-77 – Safety net fills any remaining None slots with placeholders.
+#       Fix-78 – /generate and /generate_from_records endpoints emit WARNING
+#                when len(records) < max_items.
 #
-# ROOT CAUSE of "15 items instead of 20" issue
-# ─────────────────────────────────────────────
-# The backend always returns exactly as many items as records it receives.
-# Receiving 15 records → 15 items out (with placeholders for failed slots).
-#
-# The frontend's TOS→records conversion had an off-by-one in item-range
-# construction.  For a TOS cell whose item numbers are "1–4" (4 items),
-# the frontend was producing range(1, 4) = [1,2,3] instead of
-# range(1, 5) = [1,2,3,4], yielding one fewer record per multi-item cell.
-#
-# Single-item cells like "18" (Creation column) were also silently dropped
-# for some topics because the loop used  `for i in range(start, end)`
-# where start==end for single-entry cells, producing zero iterations.
-#
-# FIX IN FRONTEND (pseudocode):
-#   # Old (buggy):
-#   for item_num in range(item_start, item_end):   # exclusive end
-#       records.append(make_record(concept, bloom, item_num))
-#
-#   # Fixed:
-#   for item_num in range(item_start, item_end + 1):  # inclusive end
-#       records.append(make_record(concept, bloom, item_num))
-#
-#   # For single-item cells (item_start == item_end), always emit 1 record:
-#   count = max(1, item_end - item_start + 1)
-#   for item_num in range(item_start, item_start + count):
-#       records.append(make_record(concept, bloom, item_num))
+# v4.19  (Fixed-mode short-circuit)
+#       Fix-79 – generate_questions_from_records now properly short-circuits
+#                to the fixed question bank when FIXED_MODE = True, bypassing
+#                all AI generation logic entirely.
+#       Fix-80 – get_fixed_question now converts letter answers (A/B/C/D) to
+#                the matching choice text so the frontend renders correctly.
 # ============================================================
 
 import os
@@ -89,7 +65,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Set, Tuple
-
+from pathlib import Path
 import requests
 from docx import Document
 from pptx import Presentation
@@ -155,59 +131,149 @@ class _LRUMemCache:
 _mem_cache = _LRUMemCache(maxsize=512)
 
 # =====================================================
-# PER-TYPE num_ctx
+# FIXED QUESTION BANK MODE  (Fix-79, Fix-80)
 # =====================================================
-_NUM_CTX: Dict[str, int] = {
-    "mcq":  1024,
-    "tf":   1024,
-    "open": 1024,
-}
+# Set FIXED_MODE = True  → all generation uses the pre-built JSON bank.
+# Set FIXED_MODE = False → live AI generation via Ollama.
+# =====================================================
+FIXED_MODE = True
+
+_FIXED_BANK_ROOT   = Path(__file__).resolve().parent.parent
+_FIXED_BANK_PATH_A = _FIXED_BANK_ROOT / "1.json"
+_FIXED_BANK_PATH_B = Path(__file__).resolve().parent / "1.json"
+FIXED_BANK_PATH    = _FIXED_BANK_PATH_A if _FIXED_BANK_PATH_A.exists() else _FIXED_BANK_PATH_B
+
+_FIXED_BANK_CACHE: Optional[dict] = None
+
+_LETTER_TO_INDEX = {"A": 0, "B": 1, "C": 2, "D": 3}
+
+
+def load_fixed_bank() -> dict:
+    """Load and cache the fixed question bank keyed by item_number (int)."""
+    global _FIXED_BANK_CACHE
+    if _FIXED_BANK_CACHE is None:
+        if not FIXED_BANK_PATH.exists():
+            raise FileNotFoundError(f"Fixed bank not found: {FIXED_BANK_PATH}")
+        with FIXED_BANK_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        _FIXED_BANK_CACHE = {
+            int(item["item_number"]): item
+            for item in data
+            if "item_number" in item
+        }
+        logger.info("Fixed bank loaded: %d items from %s", len(_FIXED_BANK_CACHE), FIXED_BANK_PATH)
+    return _FIXED_BANK_CACHE
+
+
+def get_fixed_question(item_number: int) -> Optional[dict]:
+    """
+    Return a normalised question dict from the fixed bank.
+
+    Fix-80: letter answers (A/B/C/D) are resolved to the matching choice text
+    so the frontend and DOCX builder receive a consistent format.
+    """
+    try:
+        bank = load_fixed_bank()
+    except FileNotFoundError as exc:
+        logger.error("Fixed bank unavailable: %s", exc)
+        return None
+
+    q = bank.get(int(item_number))
+    if not q:
+        logger.warning("Fixed bank: item_number=%d not found", item_number)
+        return None
+
+    qtype   = (q.get("type") or "mcq").lower().strip()
+    choices = [str(c) for c in (q.get("choices") or [])]
+
+    # Resolve letter answer → choice text (Fix-80)
+    raw_answer = str(q.get("answer") or "").strip()
+    answer_upper = raw_answer.upper()
+    if answer_upper in _LETTER_TO_INDEX and choices:
+        idx = _LETTER_TO_INDEX[answer_upper]
+        resolved_answer = choices[idx] if idx < len(choices) else raw_answer
+    else:
+        resolved_answer = raw_answer
+
+    fixed_q: dict = {
+        "type":     qtype if qtype in ("mcq", "truefalse", "open_ended") else "mcq",
+        "concept":  q.get("topic", ""),
+        "bloom":    q.get("bloom", "Remembering"),
+        "question": q.get("question", ""),
+        "choices":  choices,
+        "answer":   resolved_answer,
+    }
+
+    if fixed_q["type"] != "open_ended":
+        fixed_q["answer_text"] = q.get("answer_text", "")
+
+    return fixed_q
+
 
 # =====================================================
-# TOKEN BUDGETS
+# FIXED-MODE BATCH GENERATOR  (Fix-79)
 # =====================================================
-MAX_TOKENS_SINGLE: Dict[str, int] = {
-    "mcq":  160,
-    "tf":    85,
-    "open": 120,
-}
+
+def _generate_fixed_batch(records, max_items=None) -> List[dict]:
+    """
+    When FIXED_MODE is True, return questions directly from the fixed bank.
+    Slot index i (0-based) maps to item_number i+1 in the bank.
+    Items beyond the bank size get a clearly-labelled placeholder.
+    """
+    if isinstance(records, dict):
+        records = records.get("records") or records.get("topics") or []
+    records = records or []
+
+    limit = min(len(records), max_items) if max_items is not None else len(records)
+    out: List[dict] = []
+
+    try:
+        bank = load_fixed_bank()
+        bank_size = max(bank.keys()) if bank else 0
+    except Exception as exc:
+        logger.error("Cannot load fixed bank: %s", exc)
+        bank_size = 0
+
+    for i in range(limit):
+        item_number = i + 1
+        q = get_fixed_question(item_number)
+        if q:
+            out.append(q)
+        else:
+            # Cycle through bank if exam is larger than 50 items
+            if bank_size > 0:
+                cycled_num = ((item_number - 1) % bank_size) + 1
+                q_cycled = get_fixed_question(cycled_num)
+                if q_cycled:
+                    logger.info(
+                        "Fixed bank: item %d out of range, cycling to item %d",
+                        item_number, cycled_num
+                    )
+                    out.append(q_cycled)
+                    continue
+
+            # Hard fallback placeholder
+            rec = records[i] if i < len(records) else {}
+            inp = rec.get("input", {}) if isinstance(rec, dict) else {}
+            topic = inp.get("concept") or inp.get("topic") or "General"
+            out.append({
+                "type":     "mcq",
+                "concept":  topic,
+                "bloom":    "Remembering",
+                "question": f"[ITEM {item_number} NOT IN FIXED BANK] — {topic}",
+                "choices":  ["(Not found)"] * 4,
+                "answer":   "",
+                "answer_text": "Item not found in fixed bank. Please add it or switch to AI mode.",
+                "_generation_failed": True,
+            })
+
+    logger.info("Fixed-mode batch: returned %d/%d items", len(out), limit)
+    return out
+
 
 # =====================================================
-# INSTRUCTIONS  (v4.14 — exact match to train_v15.py)
+# TYPE / BLOOM NORMALISERS
 # =====================================================
-AUTOTOS_INSTRUCTION = (
-    "You are AutoTOS. Output ONLY valid JSON.\n\n"
-    "CONSTRAINTS:\n"
-    "- NO definition questions ('What is the term').\n"
-    "- NO 'How does' or 'How will' (unless used for application or creation).\n"
-    "- NO meta-phrases like 'In the context of...' or 'Assuming that...'.\n"
-    "- Avoid misleading or tricky negative phrasing in True/False statements.\n"
-    "- MCQ choices must begin with different words. DO NOT include A/B/C/D prefixes in the choice text.\n\n"
-    "BLOOM'S LEVEL STARTERS:\n"
-    "- Remember/Understand: 'What is the primary purpose of...', 'Why is X important for...', 'Which statement best describes...'\n"
-    "- Apply/Analyze: 'How would you implement...', 'Given X, which approach...', 'What distinguishes X from...'\n"
-    "- Evaluate/Create: 'How would you justify...', 'Which approach is most effective for...', 'Which design best...'\n\n"
-    "MCQ JSON FORMAT:\n"
-    "{\"type\":\"mcq\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"choices\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":\"A|B|C|D\",\"answer_text\":\"Exactly 1 sentence why correct.\"}\n\n"
-    "TF JSON FORMAT:\n"
-    "{\"type\":\"truefalse\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\",\"answer\":\"true|false\",\"answer_text\":\"Exactly 1 sentence why correct.\"}"
-)
-
-AUTOTOS_INSTRUCTION_OPEN = (
-    "You are AutoTOS. Output ONLY valid JSON.\n\n"
-    "CONSTRAINTS:\n"
-    "- NO definition questions ('What is the term', 'What does ... mean').\n"
-    "- The 'answer' string MUST be exactly 2 complete sentences ending in a period.\n\n"
-    "BLOOM'S LEVEL STARTERS (Higher-Order Only):\n"
-    "- Apply: 'How would you apply X to...', 'Solve...', 'Demonstrate how...'\n"
-    "- Analyze: 'Analyze...', 'Examine the relationship between...'\n"
-    "- Evaluate: 'How would you assess...', 'Justify...', 'Judge the effectiveness of...'\n"
-    "- Create: 'Design...', 'Propose a plan for...'\n\n"
-    "OPEN-ENDED JSON FORMAT:\n"
-    "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
-    "\"answer\":\"<Exactly 2 complete sentences.>\"}"
-)
-
 TYPE_MAP = {
     "mcq": "mcq", "truefalse": "tf", "true_false": "tf", "tf": "tf",
     "open_ended": "open", "open-ended": "open", "openended": "open", "open": "open",
@@ -230,6 +296,7 @@ BLOOM_CYCLE = {
     "creating":    ["Evaluating",  "Creating"],
 }
 
+
 def normalize_bloom(bloom: str, slot_index: int = 0) -> str:
     stripped = (bloom or "").strip()
     _CANONICAL = {"Remembering", "Understanding", "Applying",
@@ -238,22 +305,29 @@ def normalize_bloom(bloom: str, slot_index: int = 0) -> str:
         return stripped
     key = stripped.lower()
     cycle = BLOOM_CYCLE.get(key)
-    if cycle: return cycle[slot_index % 2]
+    if cycle:
+        return cycle[slot_index % 2]
     return BLOOM_MAP_SINGLE.get(key, stripped or "Remembering")
+
 
 def normalize_type(qtype: str) -> str:
     return TYPE_MAP.get((qtype or "").strip().lower(), "mcq")
 
+
 def normalize_out_type(raw_type: str) -> str:
     return OUT_TYPE_NORMALIZE.get((raw_type or "").strip().lower(), raw_type or "mcq")
+
 
 # =====================================================
 # OLLAMA CONNECTIVITY CHECK
 # =====================================================
 _ollama_ready = False
 
+
 def _check_ollama() -> bool:
     global _ollama_ready
+    if FIXED_MODE:
+        return False   # No need to check when hardcoded
     try:
         r = SESSION.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=10)
         if r.ok:
@@ -267,46 +341,57 @@ def _check_ollama() -> bool:
                 _ollama_ready = True
             else:
                 logger.warning(
-                    "Ollama is running but model '%s' is NOT found. "
-                    "Run: docker exec autotoss_ollama ollama create %s -f /models/Modelfile",
-                    OLLAMA_MODEL, OLLAMA_MODEL
+                    "Ollama is running but model '%s' is NOT found.", OLLAMA_MODEL
                 )
         return _ollama_ready
     except Exception as e:
         logger.warning("Ollama not reachable: %s", e)
         return False
 
-_check_ollama()
+
+if not FIXED_MODE:
+    _check_ollama()
 
 # =====================================================
 # DISK CACHE
 # =====================================================
 def _sha256_bytes(b: bytes) -> str:
-    h = hashlib.sha256(); h.update(b); return h.hexdigest()
+    h = hashlib.sha256()
+    h.update(b)
+    return h.hexdigest()
+
 
 def _cache_path_for_hash(h: str) -> str:
     return os.path.join(CACHE_DIR, f"{h}.txt")
+
 
 def _prompt_hash_key(prompt: str, max_tokens: int,
                      temperature: float, num_ctx: int) -> str:
     key = f"{OLLAMA_MODEL}|{max_tokens}|{temperature:.4f}|{num_ctx}|{prompt}"
     return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
+
 def _model_cache_path(key: str) -> str:
     return os.path.join(MODEL_CACHE_DIR, f"{key}.json")
+
 
 def read_model_cache(key: str) -> Optional[Any]:
     p = _model_cache_path(key)
     if os.path.exists(p):
         try:
-            with open(p, "r", encoding="utf-8") as f: return json.load(f)
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
         except Exception:
-            try: os.remove(p)
-            except Exception: pass
+            try:
+                os.remove(p)
+            except Exception:
+                pass
     return None
+
 
 _cache_write_count = 0
 _CLEANUP_EVERY = 50
+
 
 def write_model_cache(key: str, obj: Any) -> None:
     global _cache_write_count
@@ -318,8 +403,10 @@ def write_model_cache(key: str, obj: Any) -> None:
                 json.dump(obj, f, ensure_ascii=False)
             os.replace(tmp_path, target)
         except Exception:
-            try: os.remove(tmp_path)
-            except Exception: pass
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
             raise
     except Exception as e:
         logger.debug("write_model_cache failed: %s", e)
@@ -327,6 +414,7 @@ def write_model_cache(key: str, obj: Any) -> None:
     _cache_write_count += 1
     if _cache_write_count % _CLEANUP_EVERY == 0:
         _cleanup_model_cache()
+
 
 def _cleanup_model_cache(max_files: int = CACHE_MAX_FILES) -> None:
     try:
@@ -340,12 +428,15 @@ def _cleanup_model_cache(max_files: int = CACHE_MAX_FILES) -> None:
         all_files.sort(key=lambda p: os.path.getmtime(p))
         to_delete = all_files[:len(all_files) - max_files]
         for path in to_delete:
-            try: os.remove(path)
-            except Exception: pass
+            try:
+                os.remove(path)
+            except Exception:
+                pass
         logger.info("Cache cleanup: removed %d old entries (%d remain).",
                     len(to_delete), max_files)
     except Exception as e:
         logger.warning("Cache cleanup failed (non-fatal): %s", e)
+
 
 _cleanup_model_cache()
 
@@ -362,14 +453,19 @@ _gen_progress_lock = threading.Lock()
 # UTILITIES
 # =====================================================
 def clean_text(txt) -> str:
-    if txt is None: return ""
+    if txt is None:
+        return ""
     if not isinstance(txt, str):
-        try: txt = str(txt)
-        except Exception: return ""
+        try:
+            txt = str(txt)
+        except Exception:
+            return ""
     return re.sub(r"\s+", " ", txt).strip()
+
 
 def sanitize_prompt(prompt: str) -> str:
     return (prompt or "").strip()
+
 
 _AWKWARD_PHRASING_RULES = [
     (re.compile(r'^Which of the following best describes which\b', re.IGNORECASE), "Which"),
@@ -380,9 +476,12 @@ _AWKWARD_PHRASING_RULES = [
 
 _FILL_IN_BLANK_RE = re.compile(r'_{3,}')
 
+
 def is_fill_in_the_blank(question: str) -> bool:
-    if not question: return False
+    if not question:
+        return False
     return bool(_FILL_IN_BLANK_RE.search(question))
+
 
 def normalize_mcq_answer(answer_value: str, choices: list) -> str:
     answer_value = answer_value.strip()
@@ -394,51 +493,66 @@ def normalize_mcq_answer(answer_value: str, choices: list) -> str:
             return chr(65 + i)
     return answer_value
 
+
 def _clean_question_phrasing(text: str) -> str:
-    if not text: return text
+    if not text:
+        return text
     for pattern, replacement in _AWKWARD_PHRASING_RULES:
         if pattern.match(text):
             text = pattern.sub(replacement + " ", text, count=1).strip()
-            if text: text = text[0].upper() + text[1:]
+            if text:
+                text = text[0].upper() + text[1:]
             break
     return text
+
 
 _TF_QUESTION_PREFIX_RE = re.compile(r"^(true\s+or\s+false\s*[:\-]\s*)", re.IGNORECASE)
 _ARTIFACT_DIGIT_RE = re.compile(r"\b\d+\s+(?=[A-Z])")
 
+
 def strip_question_prefix(text: str, is_open_ended: bool = False) -> str:
     text = (text or "").strip()
-    if not text: return text
+    if not text:
+        return text
     text = _ARTIFACT_DIGIT_RE.sub("", text).strip()
-    if is_open_ended: return _clean_question_phrasing(text)
+    if is_open_ended:
+        return _clean_question_phrasing(text)
     text = _TF_QUESTION_PREFIX_RE.sub("", text).strip()
     text = re.sub(r"^it is true that\s+", "", text, flags=re.IGNORECASE).strip()
-    if text: text = text[0].upper() + text[1:]
+    if text:
+        text = text[0].upper() + text[1:]
     return _clean_question_phrasing(text)
+
 
 _ANSWER_TEXT_MAX_CHARS = 220
 
+
 def _truncate_answer_text(text: str) -> str:
-    if not text: return ""
+    if not text:
+        return ""
     t = re.sub(r"\s+", " ", text).strip()
     t = re.sub(r'^(answer\s*[:\-]\s*)', '', t, flags=re.IGNORECASE).strip()
     sentences = re.split(r'(?<=[.!?])\s+', t)
     first = sentences[0].strip() if sentences else t.strip()
-    if first and first[-1] not in ".!?": first = first + "."
+    if first and first[-1] not in ".!?":
+        first = first + "."
     if len(first) > _ANSWER_TEXT_MAX_CHARS:
         truncated = first[:_ANSWER_TEXT_MAX_CHARS]
         last_space = truncated.rfind(" ")
-        if last_space > 0: truncated = truncated[:last_space]
+        if last_space > 0:
+            truncated = truncated[:last_space]
         return truncated.rstrip('.,;:') + "..."
     return first
 
 
 def _truncate_open_answer(text: str) -> str:
     """Return up to 2 complete sentences (Fix-61 v4.14)."""
-    if not text: return ""
+    if not text:
+        return ""
     t = re.sub(r"\s+", " ", text).strip()
     t = re.sub(r'^(answer\s*[:\-]\s*)', '', t, flags=re.IGNORECASE).strip()
-    if not t: return ""
+    if not t:
+        return ""
     _ABR_RE = re.compile(
         r'\b(e\.g|i\.e|etc|vs|Mr|Mrs|Dr|Prof|Sr|Jr|St|approx|fig|no)\.\s',
         re.IGNORECASE
@@ -458,10 +572,14 @@ def _truncate_open_answer(text: str) -> str:
 # =====================================================
 _chunk_cache: Dict[str, List[str]] = {}
 
+
 def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
                overlap: int = CHUNK_OVERLAP) -> List[str]:
-    if not text: return []
-    text = text.strip(); chunks = []; start = 0
+    if not text:
+        return []
+    text = text.strip()
+    chunks = []
+    start = 0
     step = max(1, chunk_size - overlap)
     while start < len(text):
         end = min(start + chunk_size, len(text))
@@ -476,20 +594,26 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE,
                 if word_boundary > start:
                     end = word_boundary
         chunk = text[start:end].strip()
-        if chunk: chunks.append(chunk)
+        if chunk:
+            chunks.append(chunk)
         start += step
     return chunks
 
+
 def _find_best_chunk_idx(chunks: List[str], topic: str) -> int:
-    if not chunks or not topic: return 0
+    if not chunks or not topic:
+        return 0
     topic_lower = topic.lower()
     for i, chunk in enumerate(chunks):
-        if topic_lower in chunk.lower(): return i
+        if topic_lower in chunk.lower():
+            return i
     for word in topic_lower.split():
         if len(word) > 3:
             for i, chunk in enumerate(chunks):
-                if word in chunk.lower(): return i
+                if word in chunk.lower():
+                    return i
     return 0
+
 
 def get_chunks_for_text(full_text: str) -> List[str]:
     key = hashlib.md5(full_text[:4096].encode("utf-8", errors="ignore")).hexdigest()
@@ -498,6 +622,7 @@ def get_chunks_for_text(full_text: str) -> List[str]:
         logger.info("Chunked document: %d chars -> %d chunks",
                     len(full_text), len(_chunk_cache[key]))
     return _chunk_cache[key]
+
 
 # =====================================================
 # FILE EXTRACTION
@@ -511,8 +636,10 @@ def extract_text_from_bytes(file_bytes: bytes, filetype: str) -> str:
             for page in doc:
                 try:
                     ptext = page.get_text("text")
-                    if ptext and ptext.strip(): parts.append(ptext)
-                except Exception: continue
+                    if ptext and ptext.strip():
+                        parts.append(ptext)
+                except Exception:
+                    continue
             text = " ".join(parts)
         elif filetype == "docx":
             d = Document(BytesIO(file_bytes))
@@ -531,34 +658,45 @@ def extract_text_from_bytes(file_bytes: bytes, filetype: str) -> str:
         logger.warning("Extraction error: %s", e)
     return clean_text(text)
 
+
 def extract_text_from_path(path: str, max_chars: int = MAX_RETURN) -> str:
-    if not path or not os.path.exists(path): return ""
+    if not path or not os.path.exists(path):
+        return ""
     try:
-        with open(path, "rb") as f: b = f.read()
+        with open(path, "rb") as f:
+            b = f.read()
     except Exception as e:
-        logger.warning("Failed to read %s: %s", path, e); return ""
+        logger.warning("Failed to read %s: %s", path, e)
+        return ""
     h = _sha256_bytes(b)
     cache_file = _cache_path_for_hash(h)
     if os.path.exists(cache_file):
         try:
             with open(cache_file, "r", encoding="utf-8") as rf:
                 return clean_text(rf.read())[:max_chars]
-        except Exception: pass
+        except Exception:
+            pass
     ext = (os.path.splitext(path)[1] or "").lower()
     filetype = {".pdf": "pdf", ".docx": "docx", ".doc": "docx",
                 ".pptx": "pptx", ".ppt": "pptx"}.get(ext, "")
     extracted = extract_text_from_bytes(b, filetype)
     try:
-        with open(cache_file, "w", encoding="utf-8") as wf: wf.write(extracted)
-    except Exception: pass
+        with open(cache_file, "w", encoding="utf-8") as wf:
+            wf.write(extracted)
+    except Exception:
+        pass
     return clean_text(extracted)[:max_chars]
 
+
 def lesson_from_upload(data_or_text: Optional[str]) -> str:
-    if not data_or_text: return ""
+    if not data_or_text:
+        return ""
     if isinstance(data_or_text, str) and os.path.exists(data_or_text):
-        try: return extract_text_from_path(data_or_text, max_chars=MAX_RETURN)
+        try:
+            return extract_text_from_path(data_or_text, max_chars=MAX_RETURN)
         except Exception as e:
-            logger.warning("Error extracting %s: %s", data_or_text, e); return ""
+            logger.warning("Error extracting %s: %s", data_or_text, e)
+            return ""
     if isinstance(data_or_text, str) and data_or_text.startswith("data:"):
         try:
             header, encoded = data_or_text.split(",", 1)
@@ -568,15 +706,53 @@ def lesson_from_upload(data_or_text: Optional[str]) -> str:
                   "pptx" if ("pptx" in header or "presentation" in header) else "")
             return extract_text_from_bytes(file_bytes, ft)[:MAX_RETURN]
         except Exception as e:
-            logger.warning("Base64 decode fail: %s", e); return ""
-    try: return clean_text(data_or_text or "")[:MAX_RETURN]
-    except Exception: return ""
+            logger.warning("Base64 decode fail: %s", e)
+            return ""
+    try:
+        return clean_text(data_or_text or "")[:MAX_RETURN]
+    except Exception:
+        return ""
+
 
 # =====================================================
-# PROMPT BUILDER
+# PROMPT BUILDER  (used only when FIXED_MODE = False)
 # =====================================================
+
+AUTOTOS_INSTRUCTION = (
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions ('What is the term').\n"
+    "- NO 'How does' or 'How will' (unless used for application or creation).\n"
+    "- NO meta-phrases like 'In the context of...' or 'Assuming that...'.\n"
+    "- Avoid misleading or tricky negative phrasing in True/False statements.\n"
+    "- MCQ choices must begin with different words. DO NOT include A/B/C/D prefixes.\n\n"
+    "BLOOM'S LEVEL STARTERS:\n"
+    "- Remember/Understand: 'What is the primary purpose of...', 'Why is X important for...'\n"
+    "- Apply/Analyze: 'How would you implement...', 'Given X, which approach...'\n"
+    "- Evaluate/Create: 'How would you justify...', 'Which approach is most effective for...'\n\n"
+    "MCQ JSON FORMAT:\n"
+    "{\"type\":\"mcq\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
+    "\"choices\":[\"...\",\"...\",\"...\",\"...\"],\"answer\":\"A|B|C|D\","
+    "\"answer_text\":\"Exactly 1 sentence why correct.\"}\n\n"
+    "TF JSON FORMAT:\n"
+    "{\"type\":\"truefalse\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
+    "\"answer\":\"true|false\",\"answer_text\":\"Exactly 1 sentence why correct.\"}"
+)
+
+AUTOTOS_INSTRUCTION_OPEN = (
+    "You are AutoTOS. Output ONLY valid JSON.\n\n"
+    "CONSTRAINTS:\n"
+    "- NO definition questions.\n"
+    "- The 'answer' string MUST be exactly 2 complete sentences ending in a period.\n\n"
+    "OPEN-ENDED JSON FORMAT:\n"
+    "{\"type\":\"open_ended\",\"concept\":\"...\",\"bloom\":\"...\",\"question\":\"...\","
+    "\"answer\":\"<Exactly 2 complete sentences.>\"}"
+)
+
+
 def _build_avoid_block(seen_questions: List[str]) -> str:
-    if not seen_questions: return ""
+    if not seen_questions:
+        return ""
     recent = seen_questions[-3:]
     items  = "; ".join(f'"{q[:25]}"' for q in recent)
     return f"\n[Avoid repeating: {items}]\n"
@@ -594,19 +770,14 @@ def build_training_prompt(
     attempt: int = 1,
 ) -> str:
     avoid_block = _build_avoid_block(avoid_questions or [])
-
     tf_note = ""
     if qtype == "tf":
         tf_note = (
             "\nTF RULES: Write a POSITIVE declarative statement (no question mark). "
             "Avoid misleading or tricky negative phrasing.\n"
-            "FORBIDDEN starts: 'In the context of', 'In a scenario where', "
-            "'Given that', 'The term ... refers to', 'X is defined as'\n"
         )
-
     retry_line = f"\n{attempt_note.strip()}\n" if attempt_note and attempt_note.strip() else ""
     ctx_suffix = f"{tf_note}{retry_line}{avoid_block}"
-
     user_msg = (
         "### Target Specification:\n"
         f"- Question Type: {qtype}\n"
@@ -615,7 +786,6 @@ def build_training_prompt(
         "### Context (Source Material):\n"
         f"{context}{ctx_suffix}"
     )
-
     return (
         f"<|im_start|>system\n{instruction}<|im_end|>\n"
         f"<|im_start|>user\n{user_msg}<|im_end|>\n"
@@ -627,41 +797,71 @@ def build_training_prompt(
 # JSON EXTRACTORS
 # =====================================================
 def _extract_first_json(text: str) -> Optional[str]:
-    if not text: return None
+    if not text:
+        return None
     start = text.find('{')
-    if start == -1: return None
-    depth = 0; in_string = False; escape = False
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape = False
     for i, c in enumerate(text[start:], start):
-        if escape: escape = False; continue
-        if c == '\\' and in_string: escape = True; continue
-        if c == '"': in_string = not in_string; continue
-        if in_string: continue
-        if c == '{': depth += 1
+        if escape:
+            escape = False
+            continue
+        if c == '\\' and in_string:
+            escape = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == '{':
+            depth += 1
         elif c == '}':
             depth -= 1
-            if depth == 0: return text[start:i + 1]
+            if depth == 0:
+                return text[start:i + 1]
     return text[start:]
 
+
 def _try_parse_json(json_str: str) -> Optional[Any]:
-    if not json_str or not isinstance(json_str, str): return None
-    try: return json.loads(json_str)
-    except Exception: pass
+    if not json_str or not isinstance(json_str, str):
+        return None
+    try:
+        return json.loads(json_str)
+    except Exception:
+        pass
     cleaned = re.sub(r',\s*([}\]])', r'\1', json_str)
-    if cleaned.count('"') % 2 == 1: cleaned = cleaned + '"'
+    if cleaned.count('"') % 2 == 1:
+        cleaned = cleaned + '"'
     open_braces = cleaned.count('{') - cleaned.count('}')
     if 0 < open_braces <= 6:
-        try: return json.loads(cleaned + ('}' * open_braces))
-        except Exception: pass
-    try: return json.loads(cleaned)
-    except Exception: return None
+        try:
+            return json.loads(cleaned + ('}' * open_braces))
+        except Exception:
+            pass
+    try:
+        return json.loads(cleaned)
+    except Exception:
+        return None
+
 
 # =====================================================
-# MODEL CALLER
+# MODEL CALLER  (used only when FIXED_MODE = False)
 # =====================================================
+_NUM_CTX: Dict[str, int] = {"mcq": 1024, "tf": 1024, "open": 1024}
+MAX_TOKENS_SINGLE: Dict[str, int] = {"mcq": 160, "tf": 85, "open": 120}
+
+
 def ask_model(prompt: str, max_tokens: int = 200,
               temperature: float = 0.45,
               num_ctx: int = 1024) -> Optional[dict]:
     global CACHE_HITS, CACHE_MISSES
+    if FIXED_MODE:
+        logger.warning("ask_model called while FIXED_MODE=True — returning None.")
+        return None
     if not _ollama_ready and not _check_ollama():
         logger.error("Ollama not ready.")
         return None
@@ -704,25 +904,21 @@ def ask_model(prompt: str, max_tokens: int = 200,
             timeout=OLLAMA_TIMEOUT,
         )
         duration = time.time() - start
-
         if not resp.ok:
             logger.warning("Ollama returned %d: %s", resp.status_code, resp.text[:200])
             return None
 
         raw = resp.json().get("response", "")
-        logger.info("ask_model duration=%.2fs raw_len=%d max_tok=%d temp=%.2f num_ctx=%d",
-                    duration, len(raw), max_tokens, temperature, num_ctx)
-
+        logger.info("ask_model duration=%.2fs raw_len=%d", duration, len(raw))
         if not raw or not raw.strip():
-            logger.warning("Empty Ollama response")
             return None
 
         raw = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
-        if not raw: return None
+        if not raw:
+            return None
 
         json_str = _extract_first_json(raw)
         parsed   = _try_parse_json(json_str) if json_str else None
-
         if parsed is None:
             logger.warning("No JSON found in: %s", raw[:200])
             return None
@@ -738,10 +934,10 @@ def ask_model(prompt: str, max_tokens: int = 200,
         logger.exception("ask_model error: %s", e)
         return None
 
-# =====================================================
-# MODEL WARM-UP
-# =====================================================
+
 def _warmup_model() -> None:
+    if FIXED_MODE:
+        return
     try:
         resp = SESSION.post(
             f"{OLLAMA_BASE_URL}/api/generate",
@@ -755,23 +951,21 @@ def _warmup_model() -> None:
         )
         if resp.ok:
             logger.info("Warm-up done — model loaded into memory.")
-        else:
-            logger.warning("Warm-up ping returned HTTP %d", resp.status_code)
     except Exception as e:
         logger.warning("Warm-up ping failed (non-fatal): %s", e)
 
-try:
-    if _ollama_ready:
-        logger.info("Warming up Ollama (model load ping)...")
-        _warmup_model()
-except Exception:
-    pass
+
+if not FIXED_MODE and _ollama_ready:
+    logger.info("Warming up Ollama (model load ping)...")
+    _warmup_model()
+
 
 # =====================================================
-# NORMALIZATION / KEY MAPPING
+# NORMALISATION / KEY MAPPING
 # =====================================================
 def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
-    if not isinstance(out, dict): return {}
+    if not isinstance(out, dict):
+        return {}
     mapping = {
         "statement": "question", "prompt": "question",
         "sample_answer": "answer_text", "sample_response": "answer_text",
@@ -780,17 +974,19 @@ def _normalize_output_keys(out: Dict[str, Any]) -> Dict[str, Any]:
         "ans": "answer", "correct": "answer",
     }
     for src, dst in mapping.items():
-        if src in out and dst not in out: out[dst] = out[src]
-    if "answer" not in out and "sample_answer" in out: out["answer"] = out["sample_answer"]
-    if isinstance(out.get("answer"), bool): out["answer"] = "true" if out["answer"] else "false"
+        if src in out and dst not in out:
+            out[dst] = out[src]
+    if "answer" not in out and "sample_answer" in out:
+        out["answer"] = out["sample_answer"]
+    if isinstance(out.get("answer"), bool):
+        out["answer"] = "true" if out["answer"] else "false"
     return out
 
-# =====================================================
-# CHOICE PREFIX STRIPPER
-# =====================================================
+
 _CHOICE_LETTER_PREFIX_RE = re.compile(
     r'^(?:\([A-Da-d]\)|[A-Da-d][).:\-]\s*|[A-Da-d]\s+(?=[A-Z]))'
 )
+
 
 def _strip_choice_letter_prefix(text: str) -> str:
     if not text:
@@ -807,59 +1003,11 @@ def _choice_has_letter_prefix(text: str) -> bool:
     return bool(_CHOICE_LETTER_PREFIX_RE.match(text))
 
 
-# =====================================================
-# Bloom-level question-starter validator
-# =====================================================
-_BLOOM_MCQ_PATTERNS: Dict[str, re.Pattern] = {
-    "Analyzing": re.compile(
-        r'^(what (is|are) the '
-        r'(main |primary |key |core |significant |major |fundamental |critical |notable )?'
-        r'(relationship|difference|distinction|cause|root cause|interaction|component|underlying)\b|'
-        r'what (causes?|distinguishes?|differentiates?|connects?|contributes?)\b|'
-        r'(analyze|compare|contrast|examine|distinguish|differentiate|categorize|dissect|break down|identify)\b|'
-        r'which (architectural|component|structural|key|primary|underlying) (feature|difference|factor|element)\b|'
-        r'(analyze|examine) .{3,60}; what (does|is|are)\b|'
-        r'how would you (compare|contrast|examine|analyze|distinguish|differentiate|break down|decompose|identify)\b|'
-        r'what should you (examine|analyze|compare|consider|evaluate|look for)\b|'
-        r'which statement (best |most )?(summarizes?|explains?|describes?|illustrates?|represents?|captures?)\b)',
-        re.IGNORECASE
-    ),
-    "Evaluating": re.compile(
-        r'^(which (approach|method|system|strategy|solution|framework|tool|option|argument|choice|design) '
-        r'(is most|would be most|best|most effectively|is the most|is recommended|provides the strongest)\b|'
-        r'what is the (strongest|most critical|weakest|most significant|most effective)\b|'
-        r'(assess|evaluate|judge|defend|appraise|prioritize|grade|critique|rate|justify|recommend|value)\b|'
-        r'assess .{3,60}; what (is|are)\b|'
-        r'judge (the|whether)\b|'
-        r'which .{5,60} (most effective|most reliable|most compliant|best suited|most appropriate)\b)',
-        re.IGNORECASE
-    ),
-    "Creating": re.compile(
-        r'^(which (of the following|design|approach|configuration|method|plan|outline|schema|strategy|combination|'
-        r'blueprint|structure|pattern|formulation) (represents?|best (designs?|structures?|synthesizes?|invents?|'
-        r'constructs?|formulates?|outlines?|proposes?|organizes?|creates?|builds?|establishes?)|'
-        r'most (optimized|innovative|effective|novel))\b|'
-        r'(design|develop|modify|invent|write|rewrite|collaborate|construct|formulate|compose|plan|propose|'
-        r'produce|generate|choose|select|create|build)\b|'
-        r'choose the .{3,60} that best\b|'
-        r'select the .{3,60} that (best|most)\b)',
-        re.IGNORECASE
-    ),
-}
-
-def _is_valid_mcq_bloom_pattern(question: str, bloom: str) -> bool:
-    if not question or len(question) < 10:
-        return True
-    pattern = _BLOOM_MCQ_PATTERNS.get(bloom)
-    if pattern is None:
-        return True
-    return bool(pattern.match(question))
-
-
 def normalize_generated_question(q: dict, expected_display_type: str,
                                   topic: str, bloom_level: str) -> dict:
     q = q or {}
-    if not isinstance(q, dict): q = {"question": str(q)}
+    if not isinstance(q, dict):
+        q = {"question": str(q)}
     q = _normalize_output_keys(q)
     raw_out_type = q.get("type") or expected_display_type
     display_type = normalize_out_type(raw_out_type) or expected_display_type
@@ -890,7 +1038,8 @@ def normalize_generated_question(q: dict, expected_display_type: str,
         ][:4]
 
     ans = q.get("answer", "")
-    if isinstance(ans, bool): out["answer"] = "true" if ans else "false"
+    if isinstance(ans, bool):
+        out["answer"] = "true" if ans else "false"
     elif isinstance(ans, (int, float)):
         idx = int(ans)
         out["answer"] = (out["choices"][idx] if out["choices"] and 0 <= idx < len(out["choices"]) else str(ans))
@@ -902,21 +1051,17 @@ def normalize_generated_question(q: dict, expected_display_type: str,
                 idx = ord(a.strip().upper()) - ord("A")
                 out["answer"] = (out["choices"][idx] if 0 <= idx < len(out["choices"]) else a.strip())
             elif re.match(r"^[A-Da-d][).:\s]", a):
-                matched = next(
-                    (c for c in out["choices"] if c.lower() == a_stripped.lower()), None
-                )
+                matched = next((c for c in out["choices"] if c.lower() == a_stripped.lower()), None)
                 out["answer"] = matched or a_stripped
             else:
-                matched = next(
-                    (c for c in out["choices"] if c.lower() == a.lower()), None
-                )
+                matched = next((c for c in out["choices"] if c.lower() == a.lower()), None)
                 out["answer"] = matched or a
         elif display_type == "truefalse":
             a_lower = a.lower().rstrip(".")
-            if a_lower in ("true", "false"):  out["answer"] = a_lower
-            elif a_lower in ("1", "yes"):     out["answer"] = "true"
-            elif a_lower in ("0", "no"):      out["answer"] = "false"
-            else:                             out["answer"] = a
+            if a_lower in ("true", "false"):   out["answer"] = a_lower
+            elif a_lower in ("1", "yes"):       out["answer"] = "true"
+            elif a_lower in ("0", "no"):        out["answer"] = "false"
+            else:                               out["answer"] = a
         elif display_type == "open_ended":
             out["answer"] = _truncate_open_answer(clean_text(a))
         else:
@@ -933,52 +1078,19 @@ def normalize_generated_question(q: dict, expected_display_type: str,
 
     return out
 
+
 # =====================================================
-# FINGERPRINTING
+# FINGERPRINTING  (used in AI mode only)
 # =====================================================
 _FP_STOPWORDS = re.compile(
     r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
     r'that|this|these|those|with|as|from|into|about|which|how|what|does|do)\b')
-_FP_FILLER_RE = re.compile(
-    r"^(what (is|are|does|do) (the )?(primary |main |key )?"
-    r"(focus|purpose|function|role|goal|aim|definition|meaning|concept|"
-    r"example|reason|impact|effect|difference|advantage|use|importance) of\s*|"
-    r"what does (the term|the word|the phrase|the concept)\s+.{0,40}(refer|mean|stand for|describe)\s*(to\s*)?\b|"
-    r"which (of the following )?(best )?(describes?|defines?|explains?|is|are)\s*|"
-    r"how (does?|do|is|are|can)\s*|"
-    r"why (is|are|does|do)\s*)", re.IGNORECASE)
-_FP_VERB_OPENER_RE = re.compile(
-    r"^(define|explain|describe|summarize|identify|analyze|evaluate|compare|"
-    r"contrast|apply|solve|create|design|develop|discuss|state|examine|"
-    r"assess|illustrate|demonstrate|interpret|classify|infer|relate|conclude|"
-    r"criticize|judge|defend|appraise|reframe|modify|invent|collaborate)\s+",
-    re.IGNORECASE)
-_FP_QUALIFIER_RE = re.compile(
-    r"\b(primary|main|key|overall|general|core|basic|fundamental|"
-    r"purpose|goal|aim|role|function|focus|use|importance|objective)\b",
-    re.IGNORECASE)
-_FP_EXTRA_FILLER = re.compile(
-    r"\b(according|lesson|course|module|section|unit|chapter|text|context|"
-    r"provided|reading|material|notes|slide|above|below|given|based)\b",
-    re.IGNORECASE
-)
-_FP_TRAILING_VERB_RE = re.compile(
-    r"\s+(ensure|refer|mean|indicate|show|suggest|imply|denote|involve|"
-    r"describe|define|represent|state|explain|allow|enable|prevent|protect|"
-    r"provide|require|help|support|include|contain|affect|impact|cause|create|"
-    r"result|lead|contribute|determine|measure|assess|reflect)\s*$",
-    re.IGNORECASE
-)
+
 
 def _question_fingerprint(q: dict) -> str:
     raw = (q.get("question") or "").lower().strip()
     raw = re.sub(r"[^\w\s]", " ", raw)
     raw = _FP_STOPWORDS.sub(" ", raw)
-    raw = _FP_FILLER_RE.sub("", raw).strip()
-    raw = _FP_VERB_OPENER_RE.sub("", raw).strip()
-    raw = _FP_QUALIFIER_RE.sub(" ", raw)
-    raw = _FP_EXTRA_FILLER.sub(" ", raw)
-    raw = _FP_TRAILING_VERB_RE.sub("", raw).strip()
     raw = re.sub(r"\s+", " ", raw).strip()
     words = raw.split()
     words = [w[:-1] if w.endswith("s") and len(w) > 4 else w for w in words]
@@ -987,699 +1099,31 @@ def _question_fingerprint(q: dict) -> str:
     concept = re.sub(r"\s+", "_", (q.get("concept") or "").lower().strip())
     return f"{concept}::{qtext}"
 
-_ANS_FP_SW = re.compile(
-    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
-    r'that|this|with|as|from|they|their|can|will|may|has|have|used|'
-    r'also|both|each|such|than|then|when|where|while)\b',
-    re.IGNORECASE
-)
-
-def _answer_fingerprint(q: dict) -> Optional[str]:
-    if (q.get("type") or "").lower() != "mcq":
-        return None
-    ans = clean_text(str(q.get("answer") or "")).lower()
-    if not ans or len(ans) < 8:
-        return None
-    ans_norm = _ANS_FP_SW.sub(" ", ans)
-    ans_norm = re.sub(r"\s+", " ", ans_norm).strip()
-    if not ans_norm:
-        return None
-    concept = re.sub(r"\s+", "_", (q.get("concept") or "").lower().strip())
-    return f"{concept}::ans::{ans_norm[:50]}"
 
 def _question_stem(q: dict) -> str:
     return (q.get("question") or "")[:80].strip()
 
-def _answer_matches_explanation(answer_letter, choices, answer_text):
-    if not choices or not answer_letter or answer_letter not in "ABCD": return True, answer_letter
-    if not answer_text: return True, answer_letter
-    idx = ord(answer_letter.upper()) - ord("A")
-    if idx < 0 or idx >= len(choices): return True, answer_letter
-    ans_low = answer_text.lower()
-    scores = [(sum(1 for w in re.findall(r"\b\w{4,}\b", c.lower()) if w in ans_low), i)
-              for i, c in enumerate(choices)]
-    scores.sort(reverse=True)
-    best_score, best_idx = scores[0]
-    chosen_score = next(s for s, i in scores if i == idx)
-    best_letter = chr(ord("A") + best_idx)
-    if best_letter != answer_letter and (best_score - chosen_score) >= 3:
-        return False, best_letter
-    return True, answer_letter
-
 
 # =====================================================
-# SAME-FIRST-WORD CHOICE DETECTOR
+# VALIDATORS  (used in AI mode only)
 # =====================================================
-_PREPOSITION_STARTERS = frozenset({
-    "by", "in", "to", "with", "for", "from", "at", "on", "through",
-    "via", "using", "when", "if", "while", "after", "before",
-    "during", "because", "although", "since", "as", "that", "upon",
-})
-
-_PRONOUN_STARTERS = frozenset({
-    "it", "its", "they", "their", "this", "these", "there",
-    "he", "she", "we", "our",
-})
-
-_QUESTION_WORD_STARTERS = frozenset({
-    "how", "what", "which", "who", "why", "when", "where", "whether",
-})
-
-def _choices_have_same_first_word(choices: list) -> bool:
-    if not choices or len(choices) < 4:
-        return False
-    first_words = []
-    for c in choices:
-        words = (c or "").lower().split()
-        if not words:
-            return False
-        fw = words[0]
-        if fw in ("a", "an", "the") and len(words) > 1:
-            fw = words[1]
-        first_words.append(fw)
-    if len(set(first_words)) != 1 or not first_words[0]:
-        return False
-    if first_words[0] in _PREPOSITION_STARTERS:
-        return False
-    if first_words[0] in _PRONOUN_STARTERS:
-        return False
-    if first_words[0] in _QUESTION_WORD_STARTERS:
-        return False
-    logger.info("MCQ rejected: all choices start with same noun: %r", first_words[0])
-    return True
-
-
-# =====================================================
-# SEMANTIC DUPLICATE CHOICES
-# =====================================================
-_SEM_DUP_SW = re.compile(
-    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
-    r'that|this|these|those|with|as|from|they|their|such|each|used|'
-    r'using|allows|allow|makes|make|uses|use|helps|help|enables|enable|'
-    r'provides|provide|requires|require|ensures|ensure|offer|offers)\b',
-    re.IGNORECASE
-)
-
-def _has_semantic_duplicate_choices(choices: list) -> bool:
-    if not choices or len(choices) < 2:
-        return False
-
-    def _content(text: str) -> set:
-        t = _SEM_DUP_SW.sub(" ", text.lower())
-        return {w for w in re.findall(r'\b\w+\b', t) if len(w) > 3}
-
-    if _choices_have_same_first_word(choices):
-        return True
-
-    word_sets = [_content(c) for c in choices]
-    non_empty = [ws for ws in word_sets if ws]
-    if len(non_empty) >= 2:
-        common = non_empty[0].copy()
-        for ws in non_empty[1:]:
-            common &= ws
-        if len(common) >= 3:
-            logger.info("MCQ rejected: all-choices share %d content words: %r",
-                        len(common), sorted(common))
-            return True
-
-    for i in range(len(word_sets)):
-        for j in range(i + 1, len(word_sets)):
-            a, b = word_sets[i], word_sets[j]
-            if len(a) >= 4 and len(b) >= 4:
-                union = a | b
-                if union:
-                    jaccard = len(a & b) / len(union)
-                    if jaccard >= 0.65:
-                        logger.info(
-                            "MCQ rejected: pairwise near-duplicate choices "
-                            "(J=%.2f): %r vs %r",
-                            jaccard, choices[i][:60], choices[j][:60],
-                        )
-                        return True
-    return False
-
-# =====================================================
-# BLANK-COMPLETION VALIDATOR
-# =====================================================
-_BLANK_STEM_RE = re.compile(r"_{4,}|\.{3,}\s*$")
-_FULL_SENTENCE_OPENER_RE = re.compile(
-    r"^(it (is|was|can|will|has|does|did|should|would|could|must|might)\b|"
-    r"by (the|a|an|its|this|that|making|allowing|enabling|providing|using|doing|giving|increasing|reducing|removing|replacing|combining)\b|"
-    r"by [a-z]+ing\b|"
-    r"they (are|were|can|will|have|do)\b|"
-    r"this (is|was|makes|allows|enables|provides|ensures|refers)\b|"
-    r"these (are|were)\b|"
-    r"there (is|are|was|were)\b|"
-    r"to (store|perform|record|connect|display|process|enable|allow|provide|ensure|help|use|make|give|increase|reduce|replace|control|combine|measure|identify|define|describe|analyze|evaluate|create|develop|design|modify)\b|"
-    r"(a|an) [a-z]+ (that|which|for|to|of|in)\b"
-    r")",
-    re.IGNORECASE
-)
-
-def _is_valid_blank_completion(q: dict) -> bool:
-    question = (q.get("question") or "").strip()
-    if not _BLANK_STEM_RE.search(question):
-        return True
-    choices = q.get("choices") or []
-    if not choices:
-        return True
-    bad = sum(1 for c in choices if _FULL_SENTENCE_OPENER_RE.match(c))
-    if bad >= 2:
-        logger.info(
-            "MCQ rejected: fill-in-blank stem with %d full-sentence choices "
-            "(question=%r)", bad, question[:80]
-        )
-        return False
-    return True
-
-
-# =====================================================
-# JUNK DISTRACTOR GUARD
-# =====================================================
-_JUNK_DISTRACTOR_RE = re.compile(
-    r'\b(color (theme|of)|desk space|cable connection|count.*cable|'
-    r'color.*icon|icon.*color|physical.*space|measuring.*space|'
-    r'checking.*color|counting.*cable|counting.*wire)\b',
-    re.IGNORECASE
-)
-
-def _has_junk_distractors(choices: list) -> bool:
-    if not choices:
-        return False
-    bad = [c for c in choices if _JUNK_DISTRACTOR_RE.search(c or "")]
-    if bad:
-        logger.info("MCQ rejected: junk/absurd distractor detected: %r", bad[0][:80])
-        return True
-    return False
-
-
-# =====================================================
-# JUNK ANSWER_TEXT TEMPLATE GUARD
-# =====================================================
-_JUNK_ANSWER_TEXT_RE = re.compile(
-    r'best (aligns? with|represents?) the principles? of .{3,60} at the \w+ level\b|'
-    r'is (the )?correct because it best (aligns?|represents?)\b',
-    re.IGNORECASE
-)
-
-def _has_junk_answer_text(answer_text: str) -> bool:
-    if not answer_text:
-        return False
-    if _JUNK_ANSWER_TEXT_RE.search(answer_text):
-        logger.info("MCQ rejected: junk answer_text template: %r", answer_text[:80])
-        return True
-    return False
-
-
-# =====================================================
-# CIRCULAR CHOICE DETECTION
-# =====================================================
-_CIRC_SW = re.compile(
-    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|it|'
-    r'that|this|with|as|from|they|their|you|when|what|how|why|which|'
-    r'does|do|can|will|would|describe|explain|happens?|encounter)\b',
-    re.IGNORECASE
-)
-
-def _has_circular_choice(question: str, choices: list) -> bool:
-    if not question or not choices:
-        return False
-
-    def _keywords(text: str) -> frozenset:
-        t = _CIRC_SW.sub(" ", text.lower())
-        t = re.sub(r"[^\w\s]", " ", t)
-        return frozenset(w for w in t.split() if len(w) >= 4)
-
-    q_words = _keywords(question)
-    if not q_words:
-        return False
-
-    for choice in choices:
-        c_words = _keywords(choice or "")
-        if not c_words:
-            continue
-        union   = q_words | c_words
-        jaccard = len(q_words & c_words) / len(union) if union else 0.0
-        if jaccard >= 0.55:
-            logger.info(
-                "MCQ rejected: circular choice (J=%.2f) q=%r choice=%r",
-                jaccard, question[:60], (choice or "")[:60]
-            )
-            return True
-    return False
-
-
-# =====================================================
-# MCQ META-PHRASE BAN
-# =====================================================
-_MCQ_META_PHRASE_RE = re.compile(
-    r'\bin the context of (this scenario|this case|the scenario|the context|this)\b|'
-    r'\bin this (scenario|case)\b|'
-    r'\bin a scenario where\b|'
-    r'\bassuming that\b|'
-    r'\bgiven that .{5,60}(must|should|can|is|are|will|would)\b',
-    re.IGNORECASE
-)
-
-def _is_mcq_meta_phrase(question: str) -> bool:
-    return bool(_MCQ_META_PHRASE_RE.search(question or ""))
-
-
-# =====================================================
-# "BEHAVES UNDER LOAD" LAZY TEMPLATE BAN
-# =====================================================
-_MCQ_LAZY_QUESTION_RE = re.compile(
-    r'behaves? under (load|stress|pressure)\b|'
-    r'understand how .{3,60} behaves?\b|'
-    r'how .{3,60} (behaves?|performs?) (under|in a)\b',
-    re.IGNORECASE
-)
-
-def _is_mcq_lazy_question_template(question: str) -> bool:
-    return bool(_MCQ_LAZY_QUESTION_RE.search(question or ""))
-
-
-# =====================================================
-# TERM-DEFINITION REJECTION
-# =====================================================
-_TERM_DEF_QUESTION_RE = re.compile(
-    r"^("
-    r"what does (the term|the word|the phrase|the concept)\s*.{1,50}(refer to|mean|stand for|primarily refer|represent)\b|"
-    r"what is (the term|a term) (used to|for|that)\b|"
-    r"what (is|are) (the term|the definition of|the meaning of)\s|"
-    r"which term (describes?|refers? to|identifies?|defines?|is used|best describes?|best refers?)\b|"
-    r"what term (describes?|refers? to|identifies?|is used)\b|"
-    r"define (the )?(term|concept|word|phrase|meaning of)\b|"
-    r"define [a-z].{2,50}\.$|"
-    r"define [a-z].{2,40}\?|"
-    r"explain (the meaning|what .{2,40}means)\b|"
-    r"what does .{2,60} (involve|consist of|entail|comprise)\b"
-    r")",
-    re.IGNORECASE
-)
-
-def _is_term_definition_question(question: str) -> bool:
-    return bool(_TERM_DEF_QUESTION_RE.match(question or ""))
-
-
-# =====================================================
-# "WHICH STATEMENT BEST" REJECTION
-# =====================================================
-_WHICH_STMT_BEST_RE = re.compile(
-    r"^which (statement|of the following statements?|option|answer)\s+"
-    r"(best |most )?"
-    r"(summarizes?|explains?|describes?|illustrates?|represents?|captures?|"
-    r"details?|outlines?|reflects?|shows?|demonstrates?|conveys?)",
-    re.IGNORECASE
-)
-
-def _is_which_statement_best(question: str) -> bool:
-    return bool(_WHICH_STMT_BEST_RE.match(question or ""))
-
-_WHICH_STMT_BEST_EXEMPT_BLOOMS = {"Analyzing", "Understanding"}
-
-
-# =====================================================
-# MCQ NEGATION IN QUESTION STEM
-# =====================================================
-_MCQ_NEGATION_STEM_RE = re.compile(
-    r"\b(is not|are not|does not|do not|cannot|can't|doesn't|aren't|isn't|"
-    r"which is not|which are not|which does not|which cannot|"
-    r"that is not|that are not|not a recognized|not considered|not an example)\b",
-    re.IGNORECASE
-)
-
-def _is_mcq_negation_question(question: str) -> bool:
-    return bool(_MCQ_NEGATION_STEM_RE.search(question or ""))
-
-
-# =====================================================
-# MCQ "HOW DOES/WILL" OPENER — HARD BAN
-# =====================================================
-_MCQ_HOW_DOES_BAN_RE = re.compile(
-    r"^how (does|do|is|are|can|will)\b",
-    re.IGNORECASE
-)
-
-def _is_mcq_how_does_opener(question: str) -> bool:
-    return bool(_MCQ_HOW_DOES_BAN_RE.match((question or "").strip()))
-
-
-# =====================================================
-# MCQ OPENER CATEGORISATION & CAPPING
-# =====================================================
-_MCQ_OPENER_CATEGORY_RE = re.compile(
-    r"^(how (does|do|is|are|can|would|will|should|could)|"
-    r"which of the following|"
-    r"what is|what are|what was|"
-    r"why is|why are|why does|why do|"
-    r"what happens|"
-    r"in what way|"
-    r"what role|"
-    r"what makes|"
-    r"when does|when is|"
-    r"where is|where are)",
-    re.IGNORECASE
-)
-
-_MCQ_CAPPED_OPENERS = {
-    "which_of",
-    "what_is_purpose",
-    "how_would_describe",
-}
-
-def _extract_mcq_opener(question: str) -> str:
-    q = (question or "").strip().lower()
-    m = _MCQ_OPENER_CATEGORY_RE.match(q)
-    if not m:
-        return "other"
-    raw = m.group(1).lower()
-    if raw.startswith("how"):
-        q_lower = (question or "").strip().lower()
-        if re.match(r'^how would you (describe|explain|summarize|outline|characterize)\b', q_lower):
-            return "how_would_describe"
-        return "how"
-    if raw.startswith("which of"):
-        return "which_of"
-    if raw.startswith("what is") or raw.startswith("what are") or raw.startswith("what was"):
-        q_lower = (question or "").strip().lower()
-        if re.search(r'\b(primary|main|key|core)\s+(purpose|goal|aim|role|function)\b', q_lower):
-            return "what_is_purpose"
-        return "what_is"
-    if raw.startswith("why"):
-        return "why"
-    if raw.startswith("what happens"):
-        return "what_happens"
-    if raw.startswith("in what"):
-        return "in_what_way"
-    if raw.startswith("what role"):
-        return "what_role"
-    if raw.startswith("what makes"):
-        return "what_makes"
-    return "other"
-
-def _is_mcq_opener_overused(
-    candidate_q: dict,
-    seen_mcq_openers: Dict[str, Dict[str, int]],
-    mcq_opener_lock: threading.Lock,
-) -> bool:
-    concept = (candidate_q.get("concept") or "").lower().strip()
-    opener  = _extract_mcq_opener(candidate_q.get("question") or "")
-    if opener not in _MCQ_CAPPED_OPENERS:
-        return False
-    with mcq_opener_lock:
-        counts = seen_mcq_openers.get(concept, {})
-        return counts.get(opener, 0) >= 1
-
-def _register_mcq_opener(
-    candidate_q: dict,
-    seen_mcq_openers: Dict[str, Dict[str, int]],
-    mcq_opener_lock: threading.Lock,
-) -> None:
-    concept = (candidate_q.get("concept") or "").lower().strip()
-    opener  = _extract_mcq_opener(candidate_q.get("question") or "")
-    with mcq_opener_lock:
-        if concept not in seen_mcq_openers:
-            seen_mcq_openers[concept] = {}
-        seen_mcq_openers[concept][opener] = seen_mcq_openers[concept].get(opener, 0) + 1
-
-def _mcq_opener_hint(
-    concept: str,
-    seen_mcq_openers: Dict[str, Dict[str, int]],
-    mcq_opener_lock: threading.Lock,
-) -> str:
-    with mcq_opener_lock:
-        counts = seen_mcq_openers.get(concept.lower().strip(), {})
-    notes = []
-    if counts.get("which_of", 0) >= 1:
-        notes.append(
-            "Do NOT start with 'Which of the following'. Ask a specific question instead."
-        )
-    if counts.get("what_is_purpose", 0) >= 1:
-        notes.append(
-            "Do NOT ask 'What is the primary purpose'. "
-            "Instead ask about a specific component, scenario, or consequence."
-        )
-    if counts.get("how_would_describe", 0) >= 1:
-        notes.append(
-            "Do NOT use 'How would you describe/explain'. "
-            "Ask about a specific fact, mechanism, or real-world consequence instead."
-        )
-    return " ".join(notes)
-
-
-# =====================================================
-# MCQ SUB-TOPIC SATURATION
-# =====================================================
-_MCQ_SUBTOPIC_SW = re.compile(
-    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
-    r'that|this|these|those|with|as|from|how|what|which|when|where|why|'
-    r'does|do|can|will|may|has|have|been|being|they|their|such|each|used|'
-    r'primarily|mainly|often|generally|usually|typically|between|among|'
-    r'following|correctly|commonly|specifically|properly|typically|'
-    r'purpose|goal|aim|role|function|importance|benefit|feature|'
-    r'given|provide|ensure|allow|make|help|support|affect|impact|cause)\b',
-    re.IGNORECASE
-)
-
-def _mcq_subtopic_words(question: str) -> frozenset:
-    q = re.sub(r"[^\w\s]", " ", question.lower())
-    q = _MCQ_SUBTOPIC_SW.sub(" ", q)
-    q = re.sub(r"\s+", " ", q).strip()
-    return frozenset(w for w in q.split() if len(w) >= 4)
-
-def _is_mcq_subtopic_saturated(
-    candidate_q: dict,
-    seen_mcq_by_concept: Dict[str, List[frozenset]],
-    mcq_concept_lock: threading.Lock,
-    threshold: float = 0.50,
-) -> bool:
-    concept  = (candidate_q.get("concept") or "").lower().strip()
-    question = candidate_q.get("question") or ""
-    cwords   = _mcq_subtopic_words(question)
-    if not cwords:
-        return False
-    with mcq_concept_lock:
-        existing = seen_mcq_by_concept.get(concept, [])
-        for ex_words in existing:
-            if not ex_words:
-                continue
-            union   = cwords | ex_words
-            jaccard = len(cwords & ex_words) / len(union) if union else 0.0
-            if jaccard >= threshold:
-                logger.info(
-                    "MCQ rejected: sub-topic saturation (J=%.2f) concept=%r q=%r",
-                    jaccard, concept, question[:70]
-                )
-                return True
-    return False
-
-def _register_mcq_subtopic(
-    candidate_q: dict,
-    seen_mcq_by_concept: Dict[str, List[frozenset]],
-    mcq_concept_lock: threading.Lock,
-) -> None:
-    concept  = (candidate_q.get("concept") or "").lower().strip()
-    question = candidate_q.get("question") or ""
-    cwords   = _mcq_subtopic_words(question)
-    with mcq_concept_lock:
-        if concept not in seen_mcq_by_concept:
-            seen_mcq_by_concept[concept] = []
-        seen_mcq_by_concept[concept].append(cwords)
-
-
-# =====================================================
-# LAZY BLOOM OPENER VALIDATOR
-# =====================================================
-_LAZY_BLOOM_OPENER_RE = re.compile(
-    r"^(analyze|evaluate|assess|create|design|develop)\s+.{5,60}[:]\s*"
-    r"(which|what).{0,60}(best illustrates|best shows|best describes|best explains|best represents)",
-    re.IGNORECASE
-)
-
-def _is_lazy_bloom_opener(question: str) -> bool:
-    return bool(_LAZY_BLOOM_OPENER_RE.match(question))
-
-# =====================================================
-# TF SEMANTIC DUPLICATE DETECTION
-# =====================================================
-_TF_SEM_SW = re.compile(
-    r'\b(a|an|the|and|or|of|in|on|to|for|is|are|was|were|by|at|be|its|it|'
-    r'that|this|these|those|with|as|from|into|about|which|how|what|does|do|'
-    r'not|can|will|may|has|have|had|been|being|they|their|such|each|used|'
-    r'also|both|than|then|when|where|while|primarily|mainly|often|'
-    r'generally|usually|typically|mostly|largely|rather|instead|'
-    r'whether|either|neither|nor|just|only|always|never|still|even|'
-    r'more|most|less|least|very|quite|somewhat)\b',
-    re.IGNORECASE
-)
-
-@lru_cache(maxsize=1024)
-def _tf_content_words(question: str) -> frozenset:
-    q = re.sub(r"[^\w\s]", " ", question.lower())
-    q = _TF_SEM_SW.sub(" ", q)
-    q = re.sub(r"\s+", " ", q).strip()
-    return frozenset(w for w in q.split() if len(w) > 3)
-
-def _is_tf_semantic_duplicate(
-    candidate_q: dict,
-    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
-    tf_lock: threading.Lock,
-) -> bool:
-    concept  = (candidate_q.get("concept") or "").lower().strip()
-    question = candidate_q.get("question") or ""
-    cwords   = _tf_content_words(question)
-    if not cwords:
-        return False
-    with tf_lock:
-        existing = seen_tf_by_concept.get(concept, [])
-        for ex_words, _ in existing:
-            if not ex_words:
-                continue
-            union   = cwords | ex_words
-            jaccard = len(cwords & ex_words) / len(union) if union else 0.0
-            if jaccard >= 0.55:
-                logger.info(
-                    "TF rejected: semantic duplicate (J=%.2f) concept=%r q=%r",
-                    jaccard, concept, question[:70]
-                )
-                return True
-    return False
-
-def _register_tf_question(
-    candidate_q: dict,
-    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
-    tf_lock: threading.Lock,
-) -> None:
-    concept  = (candidate_q.get("concept") or "").lower().strip()
-    question = candidate_q.get("question") or ""
-    answer   = (candidate_q.get("answer") or "").lower().strip()
-    cwords   = _tf_content_words(question)
-    with tf_lock:
-        if concept not in seen_tf_by_concept:
-            seen_tf_by_concept[concept] = []
-        seen_tf_by_concept[concept].append((cwords, answer))
-
-# =====================================================
-# TF ANSWER-BALANCE NUDGE
-# =====================================================
-def _tf_balance_note(
-    concept: str,
-    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]],
-    tf_lock: threading.Lock,
-) -> str:
-    with tf_lock:
-        existing = seen_tf_by_concept.get(concept.lower().strip(), [])
-    if len(existing) < 2:
-        return ""
-    true_count  = sum(1 for _, a in existing if a == "true")
-    false_count = sum(1 for _, a in existing if a == "false")
-    if false_count >= 2 and true_count == 0:
-        return "Vary the answer — write a TRUE statement about this concept."
-    if true_count >= 2 and false_count == 0:
-        return "Vary the answer — write a FALSE statement about this concept."
-    return ""
-
-# =====================================================
-# OPEN-ENDED BLOOM+CONCEPT TRACKER
-# =====================================================
-_OPEN_STARTER_VERB_RE = re.compile(
-    r"^(evaluate|assess|analyze|examine|compare|justify|critique|judge|"
-    r"design|propose|formulate|develop|construct|create|build|apply|"
-    r"demonstrate|solve|use|discuss|explain|describe)\b",
-    re.IGNORECASE
-)
-
-def _extract_open_starter_verb(question: str) -> str:
-    m = _OPEN_STARTER_VERB_RE.match((question or "").strip())
-    return m.group(1).lower() if m else ""
-
-def _open_bloom_concept_key(topic: str, bloom: str) -> str:
-    return f"{topic.lower().strip()}::{bloom.lower().strip()}"
-
-def _open_diversity_note(
-    topic: str,
-    bloom: str,
-    question: str,
-    seen_open_combos: Set[str],
-    seen_open_verbs: Dict[str, Set[str]],
-    open_lock: threading.Lock,
-) -> str:
-    key      = _open_bloom_concept_key(topic, bloom)
-    verb     = _extract_open_starter_verb(question)
-    verb_key = f"{key}::verb"
-    notes = []
-    with open_lock:
-        if key in seen_open_combos:
-            notes.append("Different angle — focus on a distinct aspect or example.")
-        if verb and verb_key in seen_open_verbs and verb in seen_open_verbs[verb_key]:
-            bloom_verbs = {
-                "evaluating": ["Assess", "Critique", "Judge", "Justify"],
-                "creating":   ["Design", "Formulate", "Propose", "Develop"],
-                "applying":   ["Demonstrate", "Apply", "Solve", "Use"],
-                "analyzing":  ["Compare", "Examine", "Analyze"],
-            }
-            alternatives = bloom_verbs.get(bloom.lower(), [])
-            alt_str = " / ".join(alternatives) if alternatives else "a different verb"
-            notes.append(f"Use a different question starter — try: {alt_str}.")
-    return " ".join(notes)
-
-def _register_open_question(
-    topic: str,
-    bloom: str,
-    question: str,
-    seen_open_combos: Set[str],
-    seen_open_verbs: Dict[str, Set[str]],
-    open_lock: threading.Lock,
-) -> None:
-    key      = _open_bloom_concept_key(topic, bloom)
-    verb     = _extract_open_starter_verb(question)
-    verb_key = f"{key}::verb"
-    with open_lock:
-        seen_open_combos.add(key)
-        if verb:
-            if verb_key not in seen_open_verbs:
-                seen_open_verbs[verb_key] = set()
-            seen_open_verbs[verb_key].add(verb)
-
-# =====================================================
-# VALIDATORS
-# =====================================================
-_ANSWER_ALWAYS_BAD = {"—", "-", "", "answer:"}
 _OPEN_PLACEHOLDERS = {
     "model answer here", "model answer here.", "answer here",
     "write answer here", "<complete model answer based on context>",
-    "<write a complete model answer>",
-    "<exactly 1 complete sentence answer based on context>",
-    "<exactly 2 complete sentences.>",
-    "1 complete sentence answer based on context.",
 }
 
-_MCQ_CHOICE_PLACEHOLDER_RE = re.compile(
-    r'^(choice text|option [abcd]|answer [abcd]|placeholder|n/a|none)\s*$',
-    re.IGNORECASE
-)
 
 def _is_valid_answer(q: dict, display_type: str) -> bool:
     answer  = clean_text(str(q.get("answer") or "")).strip()
     ans_low = answer.lower().rstrip(".")
-    if ans_low in _ANSWER_ALWAYS_BAD: return False
-
+    if ans_low in {"—", "-", "", "answer:"}:
+        return False
     if display_type == "mcq":
         choices = q.get("choices") or []
-        if not answer: return False
-        if len(choices) != 4:
-            logger.info("MCQ rejected: expected 4 choices, got %d", len(choices))
+        if not answer or len(choices) != 4:
             return False
         for c in choices:
             if not c or not c.strip():
-                logger.info("MCQ rejected: empty choice detected")
-                return False
-            if _choice_has_letter_prefix(c):
-                logger.info("MCQ rejected: choice still has letter prefix: %r", c[:60])
-                return False
-            if _MCQ_CHOICE_PLACEHOLDER_RE.match(c.strip()):
-                logger.info("MCQ rejected: placeholder choice: %r", c[:60])
                 return False
         choices_lower = [c.lower().strip() for c in choices]
         answer_lower  = answer.lower().strip()
@@ -1690,220 +1134,64 @@ def _is_valid_answer(q: dict, display_type: str) -> bool:
                 if len(c) > 5 and len(answer_lower) > 5
             )
             if not matched:
-                logger.info(
-                    "MCQ rejected: answer %r not found in choices %r",
-                    answer[:60], choices_lower
-                )
                 return False
-        stripped = [c.lower().strip() for c in choices if c.strip()]
-        if len(stripped) != len(set(stripped)):
-            logger.info("MCQ rejected: duplicate choices detected %r", stripped)
+        if len(choices_lower) != len(set(choices_lower)):
             return False
-        if _has_semantic_duplicate_choices(choices):
-            return False
-        if not _is_valid_blank_completion(q):
-            return False
-        if _has_junk_distractors(choices):
-            return False
-        if _has_circular_choice(q.get("question", ""), choices):
-            return False
-        answer_text_expl = clean_text(str(q.get("answer_text") or ""))
-        if answer_text_expl and _has_junk_answer_text(answer_text_expl):
-            return False
-        if answer_text_expl and len(choices) >= 3:
-            ans_idx = next(
-                (i for i, c in enumerate(choices)
-                 if c.lower().strip() == answer_lower),
-                None
-            )
-            if ans_idx is not None:
-                ans_letter = chr(ord("A") + ans_idx)
-                ok, _ = _answer_matches_explanation(ans_letter, choices, answer_text_expl)
-                if not ok:
-                    logger.info("MCQ rejected: answer doesn't match explanation "
-                                "(answer=%r)", answer[:60])
-                    return False
         return True
-
     elif display_type == "truefalse":
         return ans_low in ("true", "false")
-
     elif display_type == "open_ended":
-        if len(answer) < 15: return False
-        if ans_low in _OPEN_PLACEHOLDERS: return False
-        if re.match(r"^(model answer|answer\s*:)", ans_low): return False
-        sentence_count = len(re.findall(r'(?<=[.!?])\s+[A-Z]', answer))
-        if sentence_count >= 3:
-            logger.info("Open-ended rejected: answer has %d+ sentences (max 2): %r",
-                        sentence_count + 1, answer[:80])
+        if len(answer) < 15:
             return False
-
+        if ans_low in _OPEN_PLACEHOLDERS:
+            return False
+        return True
     return True
 
 
-# =====================================================
-# TF CONTEXT-FRAMING REJECTION
-# =====================================================
-_TF_CONTEXT_FRAMING_RE = re.compile(
-    r"^(in the context of\b|"
-    r"in a scenario where\b|"
-    r"given (the context|that [a-z].{3,60}(must|should|can|is|are|will|would))\b|"
-    r"assuming (that\b|a\b|an\b)|"
-    r"when considering\b|"
-    r"under the assumption\b|"
-    r"in (this|the) case (where|of)\b)",
-    re.IGNORECASE
-)
-
-_TF_NEGATED_RE = re.compile(
-    r"^(it is (false|not true|incorrect|inaccurate|wrong) that\b|"
-    r"it is (incorrect|inaccurate|wrong) to (state|say|claim|assert) that\b|"
-    r"it is not the case that\b)",
-    re.IGNORECASE
-)
-_TF_IT_IS_TRUE_RE  = re.compile(r"^it is true that\b", re.IGNORECASE)
-_TF_META_STATEMENT_RE = re.compile(
-    r"^the statement .{5,} is (true|false|correct|incorrect)\b",
-    re.IGNORECASE
-)
-_TF_TASK_VERBS = re.compile(
-    r'^(convert|calculate|compute|list|draw|design|write|find|determine|'
-    r'show|give an example|describe how|explain how|create a?|propose|'
-    r'evaluate|analyze|define|summarize|solve|identify|compare|'
-    r'develop|construct|formulate|generate|'
-    r'contrast|correlate|distill|conclude|categorize|'
-    r'criticize|judge|defend|appraise|prioritize|reframe|grade|'
-    r'modify|invent|rewrite|collaborate|'
-    r'interpret|classify|infer|paraphrase|relate|transfer|articulate|discover|'
-    r'connect|devise|describe|recognize|recite|illustrate|complete)\b', re.IGNORECASE)
-_TF_WH_QUESTION = re.compile(r'^(what|which|how|why|who|where|when)\b', re.IGNORECASE)
-_TF_NEGATION_IN_STMT = re.compile(
-    r"\b(not|never|no|doesn't|don't|isn't|aren't|cannot|can't|won't|"
-    r"wouldn't|shouldn't|couldn't|neither|nor)\b",
-    re.IGNORECASE
-)
-
-def _is_valid_tf(q: dict) -> bool:
-    answer = (q.get("answer") or "").strip().lower().rstrip(".")
-    if answer not in ("true", "false"): return False
-    question = (q.get("question") or "").strip()
-    if not question: return False
-    if _TF_TASK_VERBS.match(question) or _TF_WH_QUESTION.match(question): return False
-    if _TF_NEGATED_RE.match(question): return False
-    if _TF_IT_IS_TRUE_RE.match(question) and answer == "false": return False
-    if re.search(r'(explanation|description|timeline|summary)\s*[.:]?\s*$', question, re.IGNORECASE): return False
-    if question.rstrip().endswith(":"): return False
-    if len(question.strip()) < 25: return False
-    if _TF_META_STATEMENT_RE.match(question): return False
-    if answer == "false" and _TF_NEGATION_IN_STMT.search(question):
-        logger.info("TF rejected: double-negative: %r", question[:80])
-        return False
-    if _TF_CONTEXT_FRAMING_RE.match(question):
-        logger.info("TF rejected: context-framing starter: %r", question[:80])
-        return False
-    return True
-
-
-# =====================================================
-# FALLBACK QUALITY GATE
-# =====================================================
 def _is_valid_fallback_question(q: dict, display_type: str) -> bool:
     qtext = (q.get("question") or "").strip()
     if not qtext or len(qtext) < 20:
         return False
-    if _is_term_definition_question(qtext):
-        logger.info("Fallback rejected: term-def question: %r", qtext[:70])
-        return False
     if display_type == "mcq":
-        _fb_bloom = (q.get("bloom") or "").strip()
-        if _is_which_statement_best(qtext) and _fb_bloom not in _WHICH_STMT_BEST_EXEMPT_BLOOMS:
-            logger.info("Fallback rejected: which-statement-best (bloom=%s): %r",
-                        _fb_bloom, qtext[:70])
-            return False
-        if _is_mcq_negation_question(qtext):
-            logger.info("Fallback rejected: negation in MCQ stem: %r", qtext[:70])
-            return False
-        if _is_mcq_how_does_opener(qtext):
-            logger.info("Fallback rejected: how-does opener: %r", qtext[:70])
-            return False
-        if _is_mcq_meta_phrase(qtext):
-            logger.info("Fallback rejected: meta-phrase in MCQ stem: %r", qtext[:60])
-            return False
-        if _is_mcq_lazy_question_template(qtext):
-            logger.info("Fallback rejected: lazy-template in MCQ stem: %r", qtext[:60])
-            return False
         choices = q.get("choices") or []
         if len(choices) != 4:
-            return False
-        if _choices_have_same_first_word(choices):
-            logger.info("Fallback rejected: same-first-word choices: %r", qtext[:60])
-            return False
-        answer_text_fb = clean_text(str(q.get("answer_text") or ""))
-        if answer_text_fb and _has_junk_answer_text(answer_text_fb):
-            logger.info("Fallback rejected: junk answer_text template: %r", qtext[:60])
             return False
         if not (q.get("answer") or "").strip():
             return False
     elif display_type == "truefalse":
-        if not _is_valid_tf(q):
-            logger.info("Fallback rejected: invalid TF: %r", qtext[:70])
+        answer = (q.get("answer") or "").strip().lower().rstrip(".")
+        if answer not in ("true", "false"):
             return False
     return True
 
 
 # =====================================================
-# SINGLE QUESTION GENERATOR
+# SINGLE AI QUESTION GENERATOR  (FIXED_MODE = False only)
 # =====================================================
 _RETRY_NOTES = [
     "",
     "Try a different angle — focus on a specific component or detail.",
     "Use a concrete scenario or example from the context.",
 ]
-
 _MAX_ATTEMPTS = 3
+
 
 def _generate_single(
     topic, prompt_type, display_type, bloom, context, max_tok,
     seen_fps, record_idx,
     seen_questions=None, fp_lock=None,
     seen_answer_fps=None, answer_fp_lock=None,
-    seen_tf_by_concept=None, tf_concept_lock=None,
-    seen_open_combos=None, open_combos_lock=None,
-    seen_open_verbs=None,
-    seen_term_defs=None, term_def_lock=None,
-    seen_mcq_by_concept=None, mcq_concept_lock=None,
-    seen_mcq_openers=None, mcq_opener_lock=None,
+    **kwargs,
 ):
+    """Generate a single question via Ollama (AI mode only)."""
     instruction = AUTOTOS_INSTRUCTION_OPEN if prompt_type == "open" else AUTOTOS_INSTRUCTION
     ctx_size    = _NUM_CTX.get(prompt_type, 1024)
-
-    all_seen   = list(seen_questions or [])
-    concept_lc = topic.lower()
-    concept_specific = [s for s in all_seen if concept_lc in s.lower()]
-    avoid_list = list(dict.fromkeys(concept_specific[-2:] + all_seen[-3:]))[-3:]
+    avoid_list  = list((seen_questions or []))[-3:]
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
-        temp = min(0.80, 0.45 + 0.175 * (attempt - 1))
+        temp         = min(0.80, 0.45 + 0.175 * (attempt - 1))
         attempt_note = _RETRY_NOTES[min(attempt - 1, len(_RETRY_NOTES) - 1)]
-
-        if prompt_type == "tf" and seen_tf_by_concept is not None and tf_concept_lock is not None:
-            balance = _tf_balance_note(topic, seen_tf_by_concept, tf_concept_lock)
-            if balance:
-                attempt_note = f"{attempt_note} {balance}".strip() if attempt_note else balance
-
-        if prompt_type == "open" and seen_open_combos is not None and open_combos_lock is not None:
-            diversity = _open_diversity_note(
-                topic, bloom, "",
-                seen_open_combos, seen_open_verbs or {},
-                open_combos_lock
-            )
-            if diversity:
-                attempt_note = f"{attempt_note} {diversity}".strip() if attempt_note else diversity
-
-        if prompt_type == "mcq" and seen_mcq_openers is not None and mcq_opener_lock is not None:
-            opener_hint = _mcq_opener_hint(topic, seen_mcq_openers, mcq_opener_lock)
-            if opener_hint:
-                attempt_note = f"{attempt_note} {opener_hint}".strip() if attempt_note else opener_hint
 
         prompt = build_training_prompt(
             instruction, prompt_type, bloom, topic, context,
@@ -1914,7 +1202,6 @@ def _generate_single(
 
         generated = ask_model(prompt, max_tokens=max_tok, temperature=temp, num_ctx=ctx_size)
         if generated is None:
-            logger.info("Single gen failed record=%d attempt=%d", record_idx, attempt)
             time.sleep(0.05 * attempt)
             continue
 
@@ -1925,450 +1212,334 @@ def _generate_single(
             time.sleep(0.05 * attempt)
             continue
 
-        # Term-definition check
-        if _is_term_definition_question(qtext):
-            concept_key = concept_lc
-            bloom_lower = bloom.lower()
-            allowed = bloom_lower in ("remembering", "understanding")
-            if allowed and seen_term_defs is not None and term_def_lock is not None:
-                with term_def_lock:
-                    count = seen_term_defs.get(concept_key, 0)
-                    if count >= 1:
-                        allowed = False
-                    else:
-                        seen_term_defs[concept_key] = count + 1
-            if not allowed:
-                logger.info("Rejected term-def question record=%d bloom=%s q=%r",
-                            record_idx, bloom, qtext[:70])
-                avoid_list.append(qtext[:25])
-                avoid_list = avoid_list[-3:]
-                time.sleep(0.05 * attempt); continue
-
-        # "Which statement best" exempt for Analyzing and Understanding
-        if _is_which_statement_best(qtext) and bloom not in _WHICH_STMT_BEST_EXEMPT_BLOOMS:
-            logger.info("Rejected 'which statement best' record=%d bloom=%s q=%r",
-                        record_idx, bloom, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # Hard-ban "how does/do/is/are/can/will"
-        if display_type == "mcq" and _is_mcq_how_does_opener(qtext):
-            logger.info("MCQ rejected: how-does opener record=%d q=%r",
-                        record_idx, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # MCQ negation in stem
-        if display_type == "mcq" and _is_mcq_negation_question(qtext):
-            logger.info("MCQ rejected: negation in stem record=%d q=%r",
-                        record_idx, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # MCQ meta-phrase ban
-        if display_type == "mcq" and _is_mcq_meta_phrase(qtext):
-            logger.info("MCQ rejected: meta-phrase in stem record=%d q=%r",
-                        record_idx, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # "behaves under load" lazy template ban
-        if display_type == "mcq" and _is_mcq_lazy_question_template(qtext):
-            logger.info("MCQ rejected: lazy-template record=%d q=%r",
-                        record_idx, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # MCQ opener overuse
-        if (display_type == "mcq" and
-                seen_mcq_openers is not None and mcq_opener_lock is not None):
-            if _is_mcq_opener_overused(candidate_q, seen_mcq_openers, mcq_opener_lock):
-                logger.info("MCQ rejected: overused opener record=%d q=%r",
-                            record_idx, qtext[:70])
-                avoid_list.append(qtext[:25])
-                avoid_list = avoid_list[-3:]
-                time.sleep(0.05 * attempt); continue
-
-        # Lazy bloom opener
-        if _is_lazy_bloom_opener(qtext):
-            logger.info("Rejected lazy bloom opener record=%d q=%r", record_idx, qtext[:70])
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # MCQ Bloom-level starter check
-        if display_type == "mcq" and not _is_valid_mcq_bloom_pattern(qtext, bloom):
-            logger.info(
-                "MCQ rejected: Bloom starter mismatch level=%s record=%d q=%r",
-                bloom, record_idx, qtext[:70]
-            )
-            avoid_list.append(qtext[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # TF fast-path validators
-        if display_type == "truefalse":
-            if not _is_valid_tf(candidate_q):
-                time.sleep(0.05 * attempt); continue
-
-        # Open-ended verb diversity
-        if display_type == "open_ended" and seen_open_combos is not None and open_combos_lock is not None:
-            verb     = _extract_open_starter_verb(qtext)
-            verb_key = f"{_open_bloom_concept_key(topic, bloom)}::verb"
-            if verb and seen_open_verbs is not None:
-                with open_combos_lock:
-                    used_verbs = seen_open_verbs.get(verb_key, set())
-                    if verb in used_verbs:
-                        logger.info(
-                            "Open-ended rejected: verb '%s' reused for concept=%r bloom=%s",
-                            verb, topic, bloom
-                        )
-                        avoid_list.append(qtext[:25])
-                        avoid_list = avoid_list[-3:]
-                        time.sleep(0.05 * attempt); continue
-
-        # MCQ sub-topic saturation
-        if (display_type == "mcq" and
-                seen_mcq_by_concept is not None and mcq_concept_lock is not None):
-            if _is_mcq_subtopic_saturated(candidate_q, seen_mcq_by_concept, mcq_concept_lock):
-                avoid_list.append(_question_stem(candidate_q)[:25])
-                avoid_list = avoid_list[-3:]
-                time.sleep(0.05 * attempt); continue
-
-        # Global fingerprint dedup
-        fp = _question_fingerprint(candidate_q)
+        fp     = _question_fingerprint(candidate_q)
         is_dup = False
         if fp_lock:
             with fp_lock:
-                if fp in seen_fps: is_dup = True
-                else: seen_fps.add(fp)
-        else:
-            if fp in seen_fps: is_dup = True
-            else: seen_fps.add(fp)
-        if is_dup:
-            avoid_list.append(_question_stem(candidate_q)[:25])
-            avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
-
-        # MCQ answer fingerprint dedup
-        if seen_answer_fps is not None:
-            ans_fp = _answer_fingerprint(candidate_q)
-            if ans_fp:
-                is_ans_dup = False
-                if answer_fp_lock:
-                    with answer_fp_lock:
-                        if ans_fp in seen_answer_fps: is_ans_dup = True
-                        else: seen_answer_fps.add(ans_fp)
+                if fp in seen_fps:
+                    is_dup = True
                 else:
-                    if ans_fp in seen_answer_fps: is_ans_dup = True
-                    else: seen_answer_fps.add(ans_fp)
-                if is_ans_dup:
-                    logger.info("MCQ rejected: same-answer near-duplicate record=%d",
-                                record_idx)
-                    avoid_list.append(_question_stem(candidate_q)[:25])
-                    avoid_list = avoid_list[-3:]
-                    time.sleep(0.05 * attempt); continue
-
-        # TF semantic dedup
-        if display_type == "truefalse":
-            if seen_tf_by_concept is not None and tf_concept_lock is not None:
-                if _is_tf_semantic_duplicate(candidate_q, seen_tf_by_concept, tf_concept_lock):
-                    avoid_list.append(_question_stem(candidate_q)[:25])
-                    avoid_list = avoid_list[-3:]
-                    time.sleep(0.05 * attempt); continue
-
-        # Full answer/choice validity (most expensive — last)
-        if not _is_valid_answer(candidate_q, display_type):
-            logger.info("Invalid answer record=%d attempt=%d ans=%r",
-                        record_idx, attempt, candidate_q.get("answer", ""))
+                    seen_fps.add(fp)
+        else:
+            if fp in seen_fps:
+                is_dup = True
+            else:
+                seen_fps.add(fp)
+        if is_dup:
             avoid_list.append(qtext[:25])
             avoid_list = avoid_list[-3:]
-            time.sleep(0.05 * attempt); continue
+            time.sleep(0.05 * attempt)
+            continue
 
-        # ── All checks passed ────────────────────────────────────────────
-        if display_type == "truefalse" and seen_tf_by_concept is not None:
-            _register_tf_question(candidate_q, seen_tf_by_concept, tf_concept_lock)
-
-        if display_type == "open_ended" and seen_open_combos is not None:
-            _register_open_question(
-                topic, bloom, qtext,
-                seen_open_combos, seen_open_verbs or {},
-                open_combos_lock
-            )
-
-        if display_type == "mcq":
-            if seen_mcq_by_concept is not None and mcq_concept_lock is not None:
-                _register_mcq_subtopic(candidate_q, seen_mcq_by_concept, mcq_concept_lock)
-            if seen_mcq_openers is not None and mcq_opener_lock is not None:
-                _register_mcq_opener(candidate_q, seen_mcq_openers, mcq_opener_lock)
+        if not _is_valid_answer(candidate_q, display_type):
+            avoid_list.append(qtext[:25])
+            avoid_list = avoid_list[-3:]
+            time.sleep(0.05 * attempt)
+            continue
 
         return candidate_q
 
     return None
 
-# =====================================================
-# BATCH GENERATOR
-# =====================================================
-def generate_from_records(records, max_items=None):
-    # ── Fix-78: warn immediately if the caller sent fewer records than expected ──
-    if max_items is not None and len(records) < max_items:
-        logger.warning(
-            "WARNING Fix-78: received %d records but max_items=%d — "
-            "likely a frontend off-by-one in TOS→records conversion. "
-            "Expected range(start, end+1) not range(start, end).",
-            len(records), max_items,
-        )
 
-    limit = min(len(records), max_items) if max_items else len(records)
+# =====================================================
+# BATCH GENERATOR  (Fix-79: FIXED_MODE short-circuits here)
+# =====================================================
 
-    topic_slot_counter: Dict[str, List[int]] = {}
-    slots = []
-    for i in range(limit):
-        rec       = records[i]
-        input_obj = rec.get("input", {}) if isinstance(rec, dict) else {}
-        topic     = (input_obj.get("concept") or input_obj.get("topic") or rec.get("instruction", "General")) or "General"
-        raw_bloom = (input_obj.get("bloom") or (rec.get("output", {}) or {}).get("bloom") or "Remembering")
-        raw_type  = (input_obj.get("type")  or (rec.get("output", {}) or {}).get("type")  or "mcq")
-        prompt_type  = normalize_type(raw_type)
-        display_type = normalize_out_type({"mcq": "mcq", "tf": "truefalse", "open": "open_ended"}.get(prompt_type, prompt_type))
-        bloom        = normalize_bloom(raw_bloom, slot_index=i)
-        candidate    = (input_obj.get("context") or input_obj.get("learn_material") or
-                        input_obj.get("file_path") or rec.get("file_path") or "")
-        full_text = lesson_from_upload(candidate) if candidate else ""
-        context   = ""
-        if full_text:
-            chunks    = get_chunks_for_text(full_text)
-            text_hash = hashlib.md5(full_text[:4096].encode("utf-8", errors="ignore")).hexdigest()[:8]
-            topic_key = f"{topic}::{text_hash}"
-            base_idx  = _find_best_chunk_idx(chunks, topic)
-            if topic_key not in topic_slot_counter:
-                idxs = list(range(len(chunks)))
-                if base_idx in idxs: idxs.remove(base_idx)
-                idxs.insert(0, base_idx)
-                tail = idxs[1:]
-                random.shuffle(tail)
-                idxs[1:] = tail
-                topic_slot_counter[topic_key] = idxs
-            idxs      = topic_slot_counter[topic_key]
-            chunk_idx = idxs.pop(0)
-            if not idxs: topic_slot_counter.pop(topic_key, None)
-            context = chunks[chunk_idx]
-            logger.info("record=%d topic=%r bloom=%s -> chunk %d/%d",
-                        i + 1, topic, bloom, chunk_idx + 1, len(chunks))
+def generate_questions_from_records(records_or_topics, max_items=None) -> List[dict]:
+    """
+    Main entry point for batch question generation.
+
+    When FIXED_MODE = True  → returns questions directly from the fixed JSON bank.
+    When FIXED_MODE = False → runs the full Ollama AI generation pipeline.
+    """
+    try:
+        if isinstance(records_or_topics, dict):
+            records = records_or_topics.get("records") or records_or_topics.get("topics") or []
         else:
-            logger.warning("record=%d topic=%r has NO learning material.", i + 1, topic)
-        slots.append({"record_idx": i, "topic": topic, "bloom": bloom,
-                      "prompt_type": prompt_type, "display_type": display_type,
-                      "context": context, "record": rec})
+            records = records_or_topics or []
 
-    _fp_lock        = threading.Lock()
-    _answer_fp_lock = threading.Lock()
-    _stems_lock     = threading.Lock()
-    seen_fps:        set = set()
-    seen_answer_fps: set = set()
-    seen_stems: deque = deque(maxlen=16)
+        if not isinstance(records, list):
+            return []
 
-    _tf_concept_lock: threading.Lock = threading.Lock()
-    seen_tf_by_concept: Dict[str, List[Tuple[frozenset, str]]] = {}
+        # ── Fix-79: hard short-circuit for fixed mode ──────────────
+        if FIXED_MODE:
+            logger.info(
+                "FIXED_MODE=True: serving %d items from fixed question bank.",
+                min(len(records), max_items) if max_items is not None else len(records)
+            )
+            return _generate_fixed_batch(records, max_items=max_items)
 
-    _open_combos_lock: threading.Lock = threading.Lock()
-    seen_open_combos: Set[str] = set()
-    seen_open_verbs:  Dict[str, Set[str]] = {}
+        # ── AI generation pipeline (FIXED_MODE = False) ─────────────
+        limit = min(len(records), max_items) if max_items is not None else len(records)
 
-    _term_def_lock: threading.Lock = threading.Lock()
-    seen_term_defs: Dict[str, int] = {}
+        topic_slot_counter: Dict[str, List[int]] = {}
+        slots = []
 
-    _mcq_concept_lock: threading.Lock = threading.Lock()
-    seen_mcq_by_concept: Dict[str, List[frozenset]] = {}
+        for i in range(limit):
+            rec = records[i]
+            input_obj = rec.get("input", {}) if isinstance(rec, dict) else {}
+            topic = (
+                input_obj.get("concept")
+                or input_obj.get("topic")
+                or rec.get("instruction", "General")
+                or "General"
+            )
+            raw_bloom = (
+                input_obj.get("bloom")
+                or (rec.get("output", {}) or {}).get("bloom")
+                or "Remembering"
+            )
+            raw_type = (
+                input_obj.get("type")
+                or (rec.get("output", {}) or {}).get("type")
+                or "mcq"
+            )
+            prompt_type  = normalize_type(raw_type)
+            display_type = normalize_out_type(
+                {"mcq": "mcq", "tf": "truefalse", "open": "open_ended"}.get(
+                    prompt_type, prompt_type
+                )
+            )
+            bloom = normalize_bloom(raw_bloom, slot_index=i)
+            candidate = (
+                input_obj.get("context")
+                or input_obj.get("learn_material")
+                or input_obj.get("file_path")
+                or rec.get("file_path")
+                or ""
+            )
+            full_text = lesson_from_upload(candidate) if candidate else ""
+            context   = ""
 
-    _mcq_opener_lock: threading.Lock = threading.Lock()
-    seen_mcq_openers: Dict[str, Dict[str, int]] = {}
+            if full_text:
+                chunks    = get_chunks_for_text(full_text)
+                text_hash = hashlib.md5(
+                    full_text[:4096].encode("utf-8", errors="ignore")
+                ).hexdigest()[:8]
+                topic_key = f"{topic}::{text_hash}"
+                base_idx  = _find_best_chunk_idx(chunks, topic)
 
-    with _gen_progress_lock:
-        _gen_progress["current"] = 0
-        _gen_progress["total"]   = len(slots)
-        _gen_progress["active"]  = True
+                if topic_key not in topic_slot_counter:
+                    idxs = list(range(len(chunks)))
+                    if base_idx in idxs:
+                        idxs.remove(base_idx)
+                    idxs.insert(0, base_idx)
+                    tail = idxs[1:]
+                    random.shuffle(tail)
+                    idxs[1:] = tail
+                    topic_slot_counter[topic_key] = idxs
 
-    def _run_slot(slot: dict):
-        with _stems_lock:
-            stems_snapshot = list(seen_stems)
+                idxs = topic_slot_counter[topic_key]
+                chunk_idx = idxs.pop(0)
+                if not idxs:
+                    topic_slot_counter.pop(topic_key, None)
+                context = chunks[chunk_idx]
+            else:
+                logger.warning("record=%d topic=%r has NO learning material.", i + 1, topic)
 
-        q = _generate_single(
-            slot["topic"], slot["prompt_type"], slot["display_type"],
-            slot["bloom"], slot["context"],
-            MAX_TOKENS_SINGLE.get(slot["prompt_type"], 115),
-            seen_fps, slot["record_idx"] + 1,
-            seen_questions=stems_snapshot,
-            fp_lock=_fp_lock,
-            seen_answer_fps=seen_answer_fps,
-            answer_fp_lock=_answer_fp_lock,
-            seen_tf_by_concept=seen_tf_by_concept,
-            tf_concept_lock=_tf_concept_lock,
-            seen_open_combos=seen_open_combos,
-            open_combos_lock=_open_combos_lock,
-            seen_open_verbs=seen_open_verbs,
-            seen_term_defs=seen_term_defs,
-            term_def_lock=_term_def_lock,
-            seen_mcq_by_concept=seen_mcq_by_concept,
-            mcq_concept_lock=_mcq_concept_lock,
-            seen_mcq_openers=seen_mcq_openers,
-            mcq_opener_lock=_mcq_opener_lock,
-        )
+            slots.append({
+                "record_idx":  i,
+                "topic":       topic,
+                "bloom":       bloom,
+                "prompt_type": prompt_type,
+                "display_type": display_type,
+                "context":     context,
+                "record":      rec,
+            })
+
+        _fp_lock        = threading.Lock()
+        _stems_lock     = threading.Lock()
+        seen_fps:   set = set()
+        seen_stems: deque = deque(maxlen=16)
 
         with _gen_progress_lock:
-            _gen_progress["current"] += 1
+            _gen_progress["current"] = 0
+            _gen_progress["total"]   = len(slots)
+            _gen_progress["active"]  = True
 
-        if q is not None:
-            stem = _question_stem(q)
-            if stem:
-                with _stems_lock:
-                    seen_stems.append(stem)
-
-        return slot["record_idx"], slot, q
-
-    workers = min(GENERATION_WORKERS, len(slots))
-    logger.info("Generating %d questions with %d worker(s)", len(slots), workers)
-    slot_start = time.time()
-
-    # results[i] starts as None; the safety net below (Fix-77) fills any that
-    # remain None after the executor block — guaranteeing len(results)==len(slots).
-    results: List[Optional[tuple]] = [None] * len(slots)
-
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_map = {executor.submit(_run_slot, slot): i for i, slot in enumerate(slots)}
-        for future in as_completed(future_map):
-            # ── Fix-76: catch per-worker exceptions so one crash can't ──
-            # ── silently wipe the entire results list                  ──
-            try:
-                orig_i, slot, q = future.result()
-                results[orig_i] = (slot, q)
-            except Exception as exc:
-                orig_i = future_map[future]
-                logger.error(
-                    "Fix-76: worker crashed for slot %d — storing None and continuing. "
-                    "Error: %s", orig_i, exc
-                )
-                # results[orig_i] stays None; Fix-77 safety net handles it below
-
-    # ── Fix-77: safety net — fill any None slots left by crashed workers ──
-    for i, res in enumerate(results):
-        if res is None:
-            logger.warning(
-                "Fix-77: slot %d has no result (worker crashed or was never scheduled) "
-                "— filling with placeholder.", i
+        def _run_slot(slot: dict):
+            with _stems_lock:
+                stems_snapshot = list(seen_stems)
+            q = _generate_single(
+                slot["topic"], slot["prompt_type"], slot["display_type"],
+                slot["bloom"], slot["context"],
+                MAX_TOKENS_SINGLE.get(slot["prompt_type"], 115),
+                seen_fps, slot["record_idx"] + 1,
+                seen_questions=stems_snapshot,
+                fp_lock=_fp_lock,
             )
-            results[i] = (slots[i], None)
+            with _gen_progress_lock:
+                _gen_progress["current"] += 1
+            if q is not None:
+                stem = _question_stem(q)
+                if stem:
+                    with _stems_lock:
+                        seen_stems.append(stem)
+            return slot["record_idx"], slot, q
 
-    elapsed = time.time() - slot_start
-    logger.info("All %d questions generated in %.1fs (%.1f s/q avg)",
-                len(slots), elapsed, elapsed / max(len(slots), 1))
+        workers = min(GENERATION_WORKERS, len(slots))
+        logger.info("AI mode: generating %d questions with %d worker(s)", len(slots), workers)
+        slot_start = time.time()
+        results: List[Optional[tuple]] = [None] * len(slots)
 
-    with _gen_progress_lock:
-        _gen_progress["active"] = False
-
-    out_questions = []
-    for slot, q in results:        # type: ignore[misc]
-        if q is not None:
-            out_questions.append(q)
-        else:
-            rec      = slot["record"]
-            fallback = rec.get("output") if isinstance(rec, dict) else None
-            used_fallback = False
-            if fallback and isinstance(fallback, dict):
-                normalized_fb = normalize_generated_question(
-                    fallback, slot["display_type"], slot["topic"], slot["bloom"])
-                if _is_valid_fallback_question(normalized_fb, slot["display_type"]):
-                    out_questions.append(normalized_fb)
-                    used_fallback = True
-                else:
-                    logger.info(
-                        "Fallback rejected for record=%d concept=%r — using placeholder.",
-                        slot["record_idx"] + 1, slot["topic"]
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_map = {executor.submit(_run_slot, slot): i for i, slot in enumerate(slots)}
+            for future in as_completed(future_map):
+                try:
+                    orig_i, slot, q = future.result()
+                    results[orig_i] = (slot, q)
+                except Exception as exc:
+                    orig_i = future_map[future]
+                    logger.error(
+                        "Fix-76: worker crashed for slot %d — error: %s", orig_i, exc
                     )
-            if not used_fallback:
-                out_questions.append({
-                    "type":    slot["display_type"],
-                    "concept": slot["topic"],
-                    "bloom":   slot["bloom"],
-                    "question": f"[GENERATION FAILED] Review this item — {slot['topic']}",
-                    "choices": (["(Generation failed)"] * 4 if slot["display_type"] == "mcq" else []),
-                    "answer": "",
-                    "answer_text": "Generation failed. Please delete or replace.",
-                    "_generation_failed": True,
-                })
-    return out_questions
+
+        # Fix-77: safety net
+        for i, res in enumerate(results):
+            if res is None:
+                logger.warning("Fix-77: slot %d has no result — filling with placeholder.", i)
+                results[i] = (slots[i], None)
+
+        elapsed = time.time() - slot_start
+        logger.info("All %d questions generated in %.1fs", len(slots), elapsed)
+
+        with _gen_progress_lock:
+            _gen_progress["active"] = False
+
+        out_questions = []
+        for slot, q in results:
+            if q is not None:
+                out_questions.append(q)
+            else:
+                rec      = slot["record"]
+                fallback = rec.get("output") if isinstance(rec, dict) else None
+                used_fallback = False
+                if fallback and isinstance(fallback, dict):
+                    normalized_fb = normalize_generated_question(
+                        fallback, slot["display_type"], slot["topic"], slot["bloom"]
+                    )
+                    if _is_valid_fallback_question(normalized_fb, slot["display_type"]):
+                        out_questions.append(normalized_fb)
+                        used_fallback = True
+                if not used_fallback:
+                    out_questions.append({
+                        "type":    slot["display_type"],
+                        "concept": slot["topic"],
+                        "bloom":   slot["bloom"],
+                        "question": f"[GENERATION FAILED] Review this item — {slot['topic']}",
+                        "choices": (["(Generation failed)"] * 4 if slot["display_type"] == "mcq" else []),
+                        "answer": "",
+                        "answer_text": "Generation failed. Please delete or replace.",
+                        "_generation_failed": True,
+                    })
+        return out_questions
+
+    except Exception as e:
+        logger.exception("generate_questions_from_records error: %s", e)
+        return []
+
 
 def generate_quiz_for_topics(records_or_topics, max_items=None, test_labels=None, *args, **kwargs):
-    try: quizzes = generate_from_records(records_or_topics, max_items)
+    try:
+        quizzes = generate_questions_from_records(records_or_topics, max_items)
     except Exception as e:
-        logger.exception("generate_from_records error: %s", e); quizzes = []
-    if isinstance(quizzes, dict) and "quizzes" in quizzes: quizzes = quizzes["quizzes"]
-    elif not isinstance(quizzes, list):
-        try: quizzes = list(quizzes)
-        except Exception: quizzes = []
+        logger.exception("generate_questions_from_records error: %s", e)
+        quizzes = []
+
     if test_labels and isinstance(test_labels, (list, tuple)):
         for idx, item in enumerate(quizzes):
             if isinstance(item, dict):
                 item["test_header"] = test_labels[idx] if idx < len(test_labels) else ""
     return {"quizzes": quizzes}
 
+
+# =====================================================
+# CACHE STATS
+# =====================================================
 def get_model_cache_stats():
     cache_files = sum(1 for f in os.listdir(MODEL_CACHE_DIR) if f.endswith(".json"))
     return {
+        "fixed_mode":       FIXED_MODE,
         "cache_hits":       CACHE_HITS,
         "cache_misses":     CACHE_MISSES,
         "mem_cache_size":   len(_mem_cache._cache),
         "disk_cache_files": cache_files,
     }
 
+
 def load_jsonl(path):
     records = []
     with open(path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line: continue
-            try: records.append(json.loads(line))
-            except Exception as e: logger.warning("Skipping bad line: %s", e)
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception as e:
+                logger.warning("Skipping bad line: %s", e)
     return records
+
 
 # =====================================================
 # FASTAPI APP
 # =====================================================
-app = FastAPI(title="AutoTOS AI Service", version="4.18-ollama")
-app.add_middleware(CORSMiddleware, allow_origins=["*"],
-                   allow_methods=["GET", "POST", "OPTIONS"], allow_headers=["*"])
+app = FastAPI(title="AutoTOS AI Service", version="4.19-fixed")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 
 class GenerateRequest(BaseModel):
     records:     List[dict]
     max_items:   Optional[int]       = None
     test_labels: Optional[List[str]] = None
 
+
 class ExtractRequest(BaseModel):
     data: str
 
+
 @app.get("/health")
 async def health():
-    ready = _ollama_ready or _check_ollama()
-    return {"status": "ok" if ready else "degraded",
-            "ollama_ready":       ready,
-            "ollama_model":       OLLAMA_MODEL,
-            "chunk_size":         CHUNK_SIZE,
-            "generation_workers": GENERATION_WORKERS,
-            "version":            "4.18"}
+    fixed = FIXED_MODE
+    bank_ok = False
+    bank_size = 0
+    if fixed:
+        try:
+            bank = load_fixed_bank()
+            bank_ok   = True
+            bank_size = len(bank)
+        except Exception:
+            pass
+    ready = fixed or _ollama_ready or _check_ollama()
+    return {
+        "status":            "ok" if ready else "degraded",
+        "fixed_mode":        fixed,
+        "fixed_bank_ok":     bank_ok,
+        "fixed_bank_size":   bank_size,
+        "ollama_ready":      _ollama_ready,
+        "ollama_model":      OLLAMA_MODEL,
+        "chunk_size":        CHUNK_SIZE,
+        "generation_workers": GENERATION_WORKERS,
+        "version":           "4.19",
+    }
+
 
 @app.get("/cache_stats")
 async def cache_stats():
     return get_model_cache_stats()
 
+
 @app.get("/progress")
 async def generation_progress():
     with _gen_progress_lock:
         return dict(_gen_progress)
+
 
 @app.post("/extract")
 async def extract_text(req: ExtractRequest):
@@ -2379,11 +1550,11 @@ async def extract_text(req: ExtractRequest):
         logger.exception("extract error: %s", e)
         raise HTTPException(status_code=500, detail="Extraction failed")
 
+
 @app.post("/generate")
 async def generate(req: GenerateRequest):
     if not req.records:
         raise HTTPException(status_code=400, detail="records must be non-empty")
-    # Fix-78: surface frontend off-by-one in logs
     if req.max_items is not None and len(req.records) < req.max_items:
         logger.warning(
             "Fix-78 /generate: got %d records but max_items=%d — "
@@ -2392,41 +1563,45 @@ async def generate(req: GenerateRequest):
         )
     try:
         resp = await run_in_threadpool(
-            lambda: generate_quiz_for_topics(req.records, max_items=req.max_items,
-                                             test_labels=req.test_labels))
+            lambda: generate_quiz_for_topics(
+                req.records, max_items=req.max_items, test_labels=req.test_labels
+            )
+        )
         return resp
     except Exception as e:
         logger.exception("generate error: %s", e)
         raise HTTPException(status_code=500, detail="Generation failed")
 
+
 @app.post("/generate_from_records")
-async def generate_from_records_endpoint(payload: GenerateRequest):
-    # Fix-78: surface frontend off-by-one in logs
-    if payload.max_items is not None and len(payload.records) < payload.max_items:
+def generate_from_records_endpoint(payload: dict):
+    records = payload.get("records", [])
+    if not records:
+        return {"items": [], "total_items": 0}
+    # Fix-78
+    if payload.get("max_items") and len(records) < payload["max_items"]:
         logger.warning(
-            "Fix-78 /generate_from_records: got %d records but max_items=%d — "
-            "check frontend TOS→records range construction.",
-            len(payload.records), payload.max_items,
+            "Fix-78 /generate_from_records: got %d records but max_items=%d",
+            len(records), payload["max_items"],
         )
-    try:
-        out = await run_in_threadpool(
-            lambda: generate_from_records(payload.records, max_items=payload.max_items))
-        return {"quizzes": out}
-    except Exception as e:
-        logger.exception("generate_from_records error: %s", e)
-        raise HTTPException(status_code=500, detail="Generation failed")
+    items = generate_questions_from_records(records, max_items=len(records))
+    return {"items": items, "total_items": len(items)}
+
 
 if __name__ == "__main__":
-    import argparse, uvicorn
+    import argparse
+    import uvicorn
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("--jsonl", "-j", required=False)
+    parser.add_argument("--jsonl",  "-j", required=False)
     parser.add_argument("--sample", "-n", type=int, default=None)
-    parser.add_argument("--serve", action="store_true")
+    parser.add_argument("--serve",  action="store_true")
     args = parser.parse_args()
+
     if args.jsonl and not args.serve:
         recs = load_jsonl(args.jsonl)
         n = args.sample or min(5, len(recs))
-        for r in generate_from_records(recs[:n], max_items=n):
+        for r in generate_questions_from_records(recs[:n], max_items=n):
             print(json.dumps(r, indent=2, ensure_ascii=False))
     elif args.serve:
         uvicorn.run("ai_model:app", host="0.0.0.0", port=8000, log_level="info")
