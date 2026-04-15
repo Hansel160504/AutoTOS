@@ -237,9 +237,12 @@ def postprocess_quizzes(quizzes: list) -> list:
 # ============================================================
 def recompute_topics_for_derived(topics_json_str: str, quizzes: list) -> list:
     BLOOM_TO_CAT = {
-        "Remembering":"fam","Knowledge":"fam","Understand":"fam",
-        "Applying":"int","Analyzing":"int","Apply":"int","Analyze":"int",
-        "Evaluating":"cre","Creating":"cre","Evaluate":"cre","Create":"cre",
+        "Remembering":"fam","Knowledge":"fam",
+        "Understand":"fam","Understanding":"fam",          # ← added Understanding
+        "Applying":"int","Analyzing":"int",
+        "Apply":"int","Analyze":"int","Analysing":"int",   # ← added Analysing
+        "Evaluating":"cre","Creating":"cre",
+        "Evaluate":"cre","Create":"cre",
     }
     topics, _ = _parse_topics_json(topics_json_str)
     if not topics or not quizzes:
@@ -287,7 +290,7 @@ def recompute_topics_for_derived(topics_json_str: str, quizzes: list) -> list:
                 elif key == "int": ic = e + 1
                 else: cc = e + 1
             else:
-                t[f"{key}_range"] = ""
+                t[f"{key}_range"] = "—"
     return topics
 
 
@@ -489,9 +492,9 @@ def _build_docx(title, cilos, topics, quizzes, fam_pct, int_pct, cre_pct, total_
         cell_write(row.cells[0], t.get('topic') or '', bold=True, size=10,
                    align=WD_ALIGN_PARAGRAPH.LEFT)
         cell_write(row.cells[1], str(hrs),  size=10)
-        cell_write(row.cells[2], t.get('fam_range') or '', size=10)
-        cell_write(row.cells[3], t.get('int_range') or '', size=10)
-        cell_write(row.cells[4], t.get('cre_range') or '', size=10)
+        cell_write(row.cells[2], t.get('fam_range') or '—', size=10)
+        cell_write(row.cells[3], t.get('int_range') or '—', size=10)
+        cell_write(row.cells[4], t.get('cre_range') or '—', size=10)
         cell_write(row.cells[5], str(tot),  bold=True, size=10)
 
     # ── Footer (totals) row ──
