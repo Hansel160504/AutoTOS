@@ -1,0 +1,501 @@
+{# ─────────────────────────────────────────────────────────────
+   User Profile — name + password change only
+   (matches actual schema: no email/institution columns)
+   ───────────────────────────────────────────────────────────── #}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Profile – AutoTOS</title>
+
+<script>
+(function(){
+    try {
+        var t = localStorage.getItem('autotos-theme') || 'light';
+        document.documentElement.setAttribute('data-theme', t);
+        document.documentElement.style.backgroundColor = t === 'dark' ? '#0f172a' : '#f1f5f9';
+        document.documentElement.style.colorScheme = t;
+    } catch(e) {}
+})();
+</script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+    --navy: #1a2e4a; --navy-deep: #111f33; --blue: #2563eb; --blue-light: #dbeafe;
+    --slate: #64748b; --border: #e2e8f0; --text: #0f172a;
+    --amber: #d97706; --amber-light: #fef3c7;
+    --red: #dc2626; --red-light: #fee2e2;
+    --green: #16a34a; --green-light: #dcfce7;
+    --bg-page: #f1f5f9; --bg-card: #ffffff; --bg-input: #f8fafc;
+    --bg-thead: #f8fafc; --bg-readonly: #f1f5f9;
+    --text-main: #0f172a; --text-sub: #64748b; --text-muted: #94a3b8;
+    --border-col: #e2e8f0; --header-bg: #111f33;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
+    --radius: 10px;
+}
+[data-theme="dark"] {
+    --navy: #93c5fd; --navy-deep: #e2e8f0; --blue: #3b82f6; --blue-light: #1e3a5f;
+    --slate: #94a3b8; --border: #334155; --text: #f1f5f9;
+    --amber: #f59e0b; --amber-light: #2d1f06;
+    --red: #f87171; --red-light: #2d0a0a;
+    --green: #22c55e; --green-light: #052e16;
+    --bg-page: #0f172a; --bg-card: #1e293b; --bg-input: #0f172a;
+    --bg-thead: #162032; --bg-readonly: #162032;
+    --text-main: #f1f5f9; --text-sub: #94a3b8; --text-muted: #475569;
+    --border-col: #334155; --header-bg: #080f1a;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.25);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.35);
+}
+
+html { background: var(--bg-page); color-scheme: light dark; }
+[data-theme="dark"] html { color-scheme: dark; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: 'DM Sans', system-ui, sans-serif;
+    background: var(--bg-page); color: var(--text-main);
+    min-height: 100vh; padding-bottom: 60px;
+    transition: background-color 0.2s ease, color 0.2s ease;
+    animation: fadeIn 0.25s ease both;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Header */
+header {
+    background: var(--header-bg); height: 60px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 28px; position: sticky; top: 0; z-index: 200;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+}
+.header-logo { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.header-logo-mark {
+    width: 34px; height: 34px; background: var(--blue); border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif; font-size: 17px; color: white;
+}
+.header-logo-text { font-family: 'DM Serif Display', serif; font-size: 19px; color: white; }
+.header-logo-text span { color: #60a5fa; }
+header nav { display: flex; align-items: center; gap: 2px; }
+header nav a {
+    padding: 6px 14px; border-radius: 7px; text-decoration: none;
+    font-size: 13px; font-weight: 500; color: #94a3b8;
+    transition: background 0.15s, color 0.15s; white-space: nowrap;
+}
+header nav a:hover { background: rgba(255,255,255,0.08); color: white; }
+header nav a.active { background: rgba(37,99,235,0.25); color: #93c5fd; font-weight: 600; }
+header nav a.nav-logout {
+    color: #94a3b8; border: 1px solid rgba(255,255,255,0.12); margin-left: 6px;
+}
+header nav a.nav-logout:hover { background: rgba(220,38,38,0.15); border-color: rgba(220,38,38,0.3); color: #fca5a5; }
+
+.nav-profile {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 12px 4px 6px !important;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 20px !important; margin-left: 6px;
+}
+.nav-profile:hover { background: rgba(37,99,235,0.20) !important; border-color: rgba(37,99,235,0.4); }
+.nav-profile.active { background: rgba(37,99,235,0.30) !important; border-color: rgba(37,99,235,0.5); }
+.nav-avatar {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--blue);
+    color: white; display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+
+.theme-toggle {
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12); border-radius: 20px;
+    padding: 5px 12px 5px 8px; cursor: pointer;
+    transition: background 0.15s; margin-left: 8px;
+}
+.theme-toggle:hover { background: rgba(255,255,255,0.12); }
+.theme-toggle-track {
+    width: 32px; height: 17px; background: #334155; border-radius: 20px;
+    position: relative; transition: background 0.25s;
+}
+[data-theme="dark"] .theme-toggle-track { background: var(--blue); }
+.theme-toggle-thumb {
+    position: absolute; top: 2px; left: 2px; width: 13px; height: 13px;
+    background: white; border-radius: 50%;
+    transition: transform 0.25s cubic-bezier(.4,0,.2,1);
+}
+[data-theme="dark"] .theme-toggle-thumb { transform: translateX(15px); }
+.theme-toggle-icon { font-size: 13px; }
+.theme-toggle-label { font-size: 12px; font-weight: 600; color: #94a3b8; }
+[data-theme="dark"] .theme-toggle-label { color: #93c5fd; }
+
+/* Page */
+.page { max-width: 1000px; margin: 0 auto; padding: 28px 20px 60px; }
+
+.page-hero {
+    margin-bottom: 24px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+}
+.avatar-lg {
+    width: 72px; height: 72px; border-radius: 50%;
+    background: var(--blue);
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'DM Serif Display', serif; font-size: 28px; font-weight: 400;
+    flex-shrink: 0;
+    box-shadow: 0 4px 12px rgba(37,99,235,0.25);
+}
+.hero-text h2 {
+    font-family: 'DM Serif Display', serif;
+    font-size: 28px; color: var(--navy-deep); margin-bottom: 4px;
+}
+.hero-text p { font-size: 14px; color: var(--text-sub); }
+
+/* Flash messages */
+.flash-msg {
+    padding: 11px 16px; border-radius: 8px;
+    font-size: 13px; font-weight: 500; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+    animation: slideDown 0.3s ease both;
+}
+.flash-msg.success { background: var(--green-light); color: var(--green); border: 1px solid #bbf7d0; }
+.flash-msg.error   { background: var(--red-light);   color: var(--red);   border: 1px solid #fecaca; }
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Stats grid */
+.stats-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px; margin-bottom: 22px;
+}
+.stat-card {
+    background: var(--bg-card); border: 1px solid var(--border-col);
+    border-radius: var(--radius); padding: 16px 18px;
+    box-shadow: var(--shadow-sm);
+    transition: background 0.2s, transform 0.15s, box-shadow 0.15s;
+}
+.stat-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.stat-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-sub); margin-bottom: 8px;
+    display: flex; align-items: center; gap: 6px;
+}
+.stat-icon { font-size: 14px; opacity: 0.85; }
+.stat-value {
+    font-family: 'DM Serif Display', serif; font-size: 28px;
+    color: var(--navy-deep); line-height: 1.1; margin-bottom: 4px;
+}
+.stat-sub { font-size: 12px; color: var(--text-sub); }
+
+/* Two-column layout */
+.profile-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+}
+@media (max-width: 820px) { .profile-grid { grid-template-columns: 1fr; } }
+
+.card {
+    background: var(--bg-card); border: 1px solid var(--border-col);
+    border-radius: var(--radius); box-shadow: var(--shadow-sm);
+    padding: 22px 26px; transition: background 0.2s, border-color 0.2s;
+}
+.card-title {
+    font-size: 13px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--text-sub);
+    margin-bottom: 16px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-col);
+    display: flex; align-items: center; gap: 8px;
+}
+.card-title-icon { font-size: 15px; opacity: 0.9; }
+
+.field { margin-bottom: 16px; }
+.field:last-child { margin-bottom: 0; }
+.field label {
+    display: block; font-size: 13px; font-weight: 600;
+    color: var(--navy); margin-bottom: 6px;
+}
+.field input {
+    width: 100%; padding: 11px 13px;
+    border: 1.5px solid var(--border-col); border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 14px;
+    color: var(--text-main); background: var(--bg-input);
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.2s;
+    outline: none;
+}
+.field input:focus {
+    border-color: var(--blue);
+    background: var(--bg-card);
+    box-shadow: 0 0 0 3px rgba(37,99,235,0.12);
+}
+.field input::placeholder { color: var(--text-muted); }
+.field input:disabled,
+.field input[readonly] {
+    background: var(--bg-readonly); color: var(--text-muted); cursor: not-allowed;
+}
+.field-hint { font-size: 11px; color: var(--text-sub); margin-top: 4px; }
+
+/* Info display rows */
+.info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--border-col);
+    font-size: 13px;
+}
+.info-row:last-child { border-bottom: none; }
+.info-label { color: var(--text-sub); font-weight: 500; }
+.info-value { color: var(--text-main); font-weight: 600; text-align: right; }
+
+/* Buttons */
+.btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 10px 20px; border-radius: var(--radius);
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+    cursor: pointer; border: none; text-decoration: none;
+    transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
+}
+.btn.primary {
+    background: var(--blue); color: white;
+    box-shadow: 0 1px 4px rgba(37,99,235,0.25);
+}
+.btn.primary:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.3); }
+.btn.secondary {
+    background: var(--bg-card); color: var(--navy-deep);
+    border: 1.5px solid var(--border-col);
+}
+.btn.secondary:hover { filter: brightness(0.96); }
+.btn:active { transform: translateY(1px); }
+
+.btn-row {
+    display: flex; gap: 10px; margin-top: 18px; padding-top: 16px;
+    border-top: 1px solid var(--border-col);
+}
+
+/* Password strength */
+.pw-strength { display: flex; gap: 4px; margin-top: 7px; }
+.pw-bar {
+    height: 3px; flex: 1; border-radius: 2px;
+    background: var(--border-col); transition: background 0.2s;
+}
+
+@media (max-width: 600px) {
+    .theme-toggle-label { display: none; }
+    .nav-profile span:not(.nav-avatar) { display: none; }
+    .avatar-lg { width: 60px; height: 60px; font-size: 24px; }
+    .hero-text h2 { font-size: 24px; }
+}
+</style>
+</head>
+
+<body>
+
+<header>
+    <a class="header-logo" href="{{ url_for('dashboard.index') }}">
+        <div class="header-logo-mark">A</div>
+        <div class="header-logo-text">Auto<span>TOS</span></div>
+    </a>
+    <nav>
+        <a href="{{ url_for('dashboard.index') }}"   class="nav-link">Dashboard</a>
+        <a href="{{ url_for('dashboard.create') }}"  class="nav-link">Create TOS</a>
+        <a href="{{ url_for('dashboard.profile') }}" class="nav-link nav-profile active">
+            <span class="nav-avatar">{{ (current_user.name[0] if current_user.name else 'U')|upper }}</span>
+            <span>Profile</span>
+        </a>
+        <a href="/logout" class="nav-link nav-logout">Logout</a>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle dark mode">
+            <div class="theme-toggle-track"><div class="theme-toggle-thumb"></div></div>
+            <span class="theme-toggle-icon" id="themeIcon">🌙</span>
+            <span class="theme-toggle-label" id="themeLabel">Dark</span>
+        </button>
+    </nav>
+</header>
+
+<div class="page">
+
+    {# ── Hero ── #}
+    <div class="page-hero">
+        <div class="avatar-lg">{{ (current_user.name[0] if current_user.name else 'U')|upper }}</div>
+        <div class="hero-text">
+            <h2>{{ current_user.name }}</h2>
+            <p>@{{ current_user.username }} · {% if current_user.is_admin %}Administrator{% else %}Faculty account{% endif %}</p>
+        </div>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="flash-msg {{ category }}">
+            {{ '✓' if category == 'success' else '⚠' }} {{ message }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {# ── Quick stats ── #}
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label"><span class="stat-icon">⊞</span> Master Banks</div>
+            <div class="stat-value">{{ stats.master_count or 0 }}</div>
+            <div class="stat-sub">TOS records created</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><span class="stat-icon">✂</span> Derived Exams</div>
+            <div class="stat-value">{{ stats.derived_count or 0 }}</div>
+            <div class="stat-sub">selected subsets</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label"><span class="stat-icon">📝</span> Total Items</div>
+            <div class="stat-value">{{ stats.total_items or 0 }}</div>
+            <div class="stat-sub">across all master banks</div>
+        </div>
+    </div>
+
+    {# ── Two-column: profile info + password ── #}
+    <div class="profile-grid">
+
+        {# ═ Left: Profile Info ═ #}
+        <div class="card">
+            <div class="card-title"><span class="card-title-icon">👤</span> Profile Information</div>
+
+            <form action="{{ url_for('dashboard.update_profile') }}" method="POST" autocomplete="off">
+                <div class="field">
+                    <label for="name">Full Name</label>
+                    <input type="text" id="name" name="name"
+                           value="{{ current_user.name or '' }}"
+                           required maxlength="120">
+                    <div class="field-hint">This is how your name appears across the app.</div>
+                </div>
+
+                <div class="field">
+                    <label for="username">Username</label>
+                    <input type="text" id="username"
+                           value="{{ current_user.username or '' }}"
+                           readonly>
+                    <div class="field-hint">Your username cannot be changed.</div>
+                </div>
+
+                <div class="btn-row">
+                    <button type="submit" class="btn primary">💾 Save Changes</button>
+                </div>
+            </form>
+        </div>
+
+        {# ═ Right: Password + Account Info ═ #}
+        <div>
+
+            <div class="card" style="margin-bottom:20px;">
+                <div class="card-title"><span class="card-title-icon">🔒</span> Change Password</div>
+
+                <form action="{{ url_for('dashboard.change_password') }}" method="POST" autocomplete="off">
+                    <div class="field">
+                        <label for="current_password">Current Password</label>
+                        <input type="password" id="current_password" name="current_password"
+                               required placeholder="Enter current password">
+                    </div>
+
+                    <div class="field">
+                        <label for="new_password">New Password</label>
+                        <input type="password" id="new_password" name="new_password"
+                               required minlength="6"
+                               placeholder="At least 6 characters"
+                               oninput="checkPwStrength(this.value)">
+                        <div class="pw-strength">
+                            <div class="pw-bar" id="pb1"></div>
+                            <div class="pw-bar" id="pb2"></div>
+                            <div class="pw-bar" id="pb3"></div>
+                            <div class="pw-bar" id="pb4"></div>
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label for="confirm_new_password">Confirm New Password</label>
+                        <input type="password" id="confirm_new_password" name="confirm_new_password"
+                               required placeholder="Repeat new password">
+                    </div>
+
+                    <div class="btn-row">
+                        <button type="submit" class="btn primary">🔑 Update Password</button>
+                    </div>
+                </form>
+            </div>
+
+            <div class="card">
+                <div class="card-title"><span class="card-title-icon">ℹ️</span> Account Details</div>
+                <div class="info-row">
+                    <span class="info-label">Member Since</span>
+                    <span class="info-value">{{ stats.joined_on or '—' }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Account Type</span>
+                    <span class="info-value">
+                        {% if current_user.is_admin %}Administrator{% else %}Faculty{% endif %}
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Account Status</span>
+                    <span class="info-value" style="color: {{ 'var(--green)' if current_user.is_active else 'var(--red)' | safe }};">
+                        ● {% if current_user.is_active %}Active{% else %}Inactive{% endif %}
+                    </span>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+/* ── Theme toggle ── */
+(function () {
+    var STORAGE_KEY = 'autotos-theme';
+    var html  = document.documentElement;
+    var btn   = document.getElementById('themeToggle');
+    var icon  = document.getElementById('themeIcon');
+    var label = document.getElementById('themeLabel');
+
+    function applyTheme(theme) {
+        html.setAttribute('data-theme', theme);
+        html.style.backgroundColor = theme === 'dark' ? '#0f172a' : '#f1f5f9';
+        html.style.colorScheme = theme;
+        if (theme === 'dark') { icon.textContent = '☀️'; label.textContent = 'Light'; }
+        else                  { icon.textContent = '🌙'; label.textContent = 'Dark'; }
+        try { localStorage.setItem(STORAGE_KEY, theme); } catch(e) {}
+    }
+    applyTheme(html.getAttribute('data-theme') || 'light');
+    btn.addEventListener('click', function () {
+        applyTheme(html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    });
+})();
+
+/* ── Password strength ── */
+function checkPwStrength(val) {
+    var bars = ['pb1','pb2','pb3','pb4'].map(function(id){ return document.getElementById(id); });
+    var score = 0;
+    if (val.length >= 6)  score++;
+    if (val.length >= 10) score++;
+    if (/[A-Z]/.test(val) && /[0-9]/.test(val)) score++;
+    if (/[^A-Za-z0-9]/.test(val)) score++;
+    var colors = ['#ef4444','#f97316','#eab308','#22c55e'];
+    bars.forEach(function(b, i){
+        b.style.background = i < score ? colors[score-1] : 'var(--border-col)';
+    });
+}
+
+/* ── Confirm password match before submit ── */
+document.querySelectorAll('form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+        var newPw = form.querySelector('#new_password');
+        var conf  = form.querySelector('#confirm_new_password');
+        if (newPw && conf && newPw.value !== conf.value) {
+            e.preventDefault();
+            alert('New password and confirmation do not match.');
+            conf.focus();
+        }
+    });
+});
+</script>
+
+</body>
+</html>

@@ -1,9 +1,25 @@
+{# ─────────────────────────────────────────────────────────────
+   Login — subtle polish, consistent with dashboard office-style
+   ───────────────────────────────────────────────────────────── #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AutoTOS – Sign In</title>
+
+{# Login pages are always in "light mode" when rendered, but we still
+   honor the saved theme so there's no jarring switch after login. #}
+<script>
+(function(){
+    try {
+        var t = localStorage.getItem('autotos-theme') || 'light';
+        document.documentElement.style.backgroundColor = t === 'dark' ? '#0f172a' : '#ffffff';
+        document.documentElement.style.colorScheme = t;
+    } catch(e) {}
+})();
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -25,7 +41,9 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, sans-serif; color: var(--text); }
 
-/* ── Layout ── */
+body { animation: fadeIn 0.3s ease both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
 .auth-wrap { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 /* ── Left panel ── */
@@ -48,12 +66,7 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
     border: 1px solid rgba(255,255,255,0.05); border-radius: 50%; pointer-events: none;
 }
 
-/* Logo — top, in flow */
-.bp-logo {
-    position: relative; z-index: 1;
-    display: flex; align-items: center; gap: 12px;
-    flex-shrink: 0;
-}
+.bp-logo { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .bp-logo-mark {
     width: 44px; height: 44px; background: var(--blue); border-radius: 11px;
     display: flex; align-items: center; justify-content: center;
@@ -62,7 +75,6 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .bp-logo-text { font-family: 'DM Serif Display', serif; font-size: 24px; color: white; }
 .bp-logo-text span { color: #60a5fa; }
 
-/* Hero — fills remaining space, centers content */
 .bp-hero {
     position: relative; z-index: 1;
     flex: 1;
@@ -82,10 +94,8 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .bp-feat { display: flex; align-items: center; gap: 12px; font-size: 15px; color: #cbd5e1; }
 .bp-feat-dot { width: 7px; height: 7px; border-radius: 50%; background: #3b82f6; flex-shrink: 0; }
 
-/* Footer — bottom, in flow */
 .bp-footer {
-    position: relative; z-index: 1;
-    flex-shrink: 0;
+    position: relative; z-index: 1; flex-shrink: 0;
     font-size: 12px; color: #475569;
     border-top: 1px solid rgba(255,255,255,0.07); padding-top: 20px;
 }
@@ -110,11 +120,17 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .form-card-header p { font-size: 15px; color: var(--slate); line-height: 1.5; }
 
 .flash-msg {
-    padding: 11px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    padding: 11px 14px; border-radius: 8px;
+    font-size: 13px; font-weight: 500;
     margin-bottom: 20px; display: flex; align-items: center; gap: 8px;
+    animation: slideDown 0.3s ease both;
 }
-.flash-msg.error   { background: var(--error-bg);   color: var(--error);   border: 1px solid #fecaca; }
+.flash-msg.error   { background: var(--error-bg); color: var(--error); border: 1px solid #fecaca; }
 .flash-msg.success { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
 
 .field { margin-bottom: 20px; }
 .field label { display: block; font-size: 13px; font-weight: 600; color: var(--navy); margin-bottom: 7px; }
@@ -137,22 +153,6 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 }
 .btn-primary:hover { background: #1d4ed8; box-shadow: 0 4px 12px rgba(37,99,235,0.30); }
 .btn-primary:active { transform: translateY(1px); }
-
-.divider {
-    display: flex; align-items: center; gap: 12px; margin: 22px 0;
-    font-size: 12px; color: #94a3b8; font-weight: 500;
-    text-transform: uppercase; letter-spacing: 0.6px;
-}
-.divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
-
-.btn-google {
-    width: 100%; padding: 13px 20px;
-    background: var(--white); color: #374151;
-    border: 1.5px solid var(--border); border-radius: var(--radius);
-    font-family: 'DM Sans', sans-serif; font-size: 15px; font-weight: 500; cursor: pointer;
-    transition: background 0.15s; display: flex; align-items: center; justify-content: center; gap: 10px;
-}
-.btn-google:hover { background: #f9fafb; }
 
 .form-footer { margin-top: 26px; text-align: center; font-size: 14px; color: var(--slate); }
 .form-footer a { color: var(--blue); font-weight: 600; text-decoration: none; }
@@ -213,7 +213,7 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
         </div>
         <button class="btn-primary" type="submit">Sign In</button>
       </form>
-      
+
       <div class="form-footer">Don't have an account? <a href="/signup">Create one</a></div>
     </div>
   </div>

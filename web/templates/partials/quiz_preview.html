@@ -185,6 +185,15 @@ a.pv-btn-docx:hover{background:var(--pv-blue-light);border-color:var(--pv-blue-b
         </div>
       {% endif %}
 
+      {# ── Type + answer normalization (handles both v31 + legacy formats) ── #}
+      {% set qtype_l    = (q.type or '')|lower %}
+      {% set ans_raw    = (q.answer or '')|string|trim %}
+      {% set ans_upper  = ans_raw|upper|replace('.', '') %}
+      {% set ans_low    = ans_raw|lower %}
+      {% set is_mcq     = qtype_l in ('mcq', 'multiple_choice') %}
+      {% set is_tf      = qtype_l in ('truefalse', 'true_false', 'tf') %}
+      {% set ans_is_letter = is_mcq and ans_upper in ['A','B','C','D'] %}
+
       <li style="margin-bottom:22px;" data-q-index="{{ loop.index }}">
         <div class="question-item-wrapper">
           <input type="checkbox" class="question-select-cb" id="q-cb-{{ loop.index }}"
@@ -192,23 +201,39 @@ a.pv-btn-docx:hover{background:var(--pv-blue-light);border-color:var(--pv-blue-b
           <div class="question-item-body">
             <div class="q-meta">Q{{ loop.index }} &nbsp;·&nbsp; {{ (q.type or '')|upper }} &nbsp;·&nbsp; {{ q.bloom or '—' }} &nbsp;·&nbsp; {{ q.concept or '—' }}</div>
             <div class="q-text">{{ q.question or '' }}</div>
-            {% set correct_letter = '' %}
-            {% if q.type == 'mcq' and q.choices %}
+
+            {% set cl = namespace(letter='', text='') %}
+            {% if is_mcq and q.choices %}
               <ul class="choices" role="list">
-                {% set ans_l = (q.answer or '')|lower %}
                 {% for c in q.choices %}
-                  {% set letter = ['a','b','c','d','e'][loop.index0] %}
-                  {% set choice_l = (c or '')|lower %}
-                  {% set is_correct = (choice_l == ans_l) or (ans_l and ans_l in choice_l) or (ans_l == letter) %}
-                  {% if is_correct %}{% set correct_letter = letter %}{% endif %}
-                  <li class="{{ 'correct' if is_correct else '' }}"><strong>{{ letter }})</strong> {{ c }}</li>
+                  {% set letter_lc = ['a','b','c','d','e'][loop.index0] %}
+                  {% set letter_uc = ['A','B','C','D','E'][loop.index0] %}
+                  {% set choice_l  = (c or '')|lower %}
+                  {% if ans_is_letter %}
+                    {# v31: answer is a single letter — match by index #}
+                    {% set is_correct = (ans_upper == letter_uc) %}
+                  {% else %}
+                    {# Legacy: answer is full text #}
+                    {% set is_correct = (choice_l == ans_low) or (ans_low and ans_low|length > 5 and ans_low in choice_l) or (ans_low == letter_lc) %}
+                  {% endif %}
+                  {% if is_correct %}
+                    {% set cl.letter = letter_lc %}
+                    {% set cl.text = c %}
+                  {% endif %}
+                  <li class="{{ 'correct' if is_correct else '' }}"><strong>{{ letter_lc }})</strong> {{ c }}</li>
                 {% endfor %}
               </ul>
-            {% elif q.type == 'truefalse' %}<div class="tf-note">(True or False)</div>{% endif %}
+            {% elif is_tf %}
+              <div class="tf-note">(True or False)</div>
+            {% endif %}
+
             <div class="answer-block">
               <strong>Answer:</strong>
-              {% if q.type == 'mcq' and correct_letter %}{{ correct_letter }}) {{ q.answer }}
-              {% else %}{{ q.answer or '—' }}{% endif %}
+              {% if is_mcq and cl.letter %}
+                {{ cl.letter|upper }}) {{ cl.text }}
+              {% else %}
+                {{ q.answer or '—' }}
+              {% endif %}
               {% if q.answer_text %}<div class="answer-text">{{ q.answer_text }}</div>{% endif %}
             </div>
           </div>

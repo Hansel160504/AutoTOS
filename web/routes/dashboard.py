@@ -1,634 +1,114 @@
-# routes/dashboard.py
-# CILOs are stored inside topics_json as:
-#   {"_cilos": ["...", "..."], "topics": [...]}
-# Old records (plain list) are handled transparently.
-from flask import Blueprint, render_template, request, jsonify, redirect, url_for, flash, current_app, send_file
-from flask_login import login_required, current_user
-from extensions import db
-from models import TosRecord
-from datetime import datetime
+# routes/dashboard.py — slim route handlers.
+#
+# Business logic lives in services/tos_processor.py and services/docx_builder.py.
+# External-AI communication lives in services/external_ai.py.
+# Bloom mappings come from services/bloom.py.
+#
+# This file only deals with: auth, request parsing, DB access, and rendering.
+
+from __future__ import annotations
+
 import json
-import re
-import traceback
 import logging
 import os
-import base64
-import threading
-from uuid import uuid4
-from werkzeug.utils import secure_filename
-import requests
-import time
-import importlib
+import re
+from datetime import datetime
 from functools import wraps
-from io import BytesIO
+from typing import Any, Dict, List, Tuple
 
-def faculty_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if current_user.is_authenticated and current_user.is_admin is True:
-            return redirect(url_for("admin.index"))
-        return f(*args, **kwargs)
-    return decorated
+from flask import (
+    Blueprint, current_app, flash, jsonify, redirect, render_template,
+    request, send_file, url_for,
+)
+from flask_login import current_user, login_required
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from extensions import db
+from models import TosRecord, User
+
+from services.bloom import defaults_for
+from services.docx_builder import build_docx
+from services.external_ai import (
+    call_model_service,
+    fetch_remote_progress,
+    get_cache_stats,
+    progress,
+)
+from services.tos_processor import (
+    PreparedTopic,
+    ValidationError,
+    apply_bloom_distribution,
+    build_question_slots,
+    build_test_labels,
+    compute_item_ranges,
+    distribute_quiz_items,
+    dump_topics_json,
+    extract_bloom_percentages,
+    parse_topics_json,
+    postprocess_quizzes,
+    prepare_persisted_quizzes_json,
+    prepare_persisted_topics_json,
+    recompute_topics_for_derived,
+    sanitise_cilos,
+    validate_basic,
+    validate_percentages,
+    validate_tests,
+    validate_topics,
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 dashboard_bp = Blueprint("dashboard", __name__, url_prefix="/dashboard")
 
+# ── Paths (consistent with docker-compose volume mount) ──────────────
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-UPLOADS_DIR  = os.path.join(PROJECT_ROOT, "uploads")
+UPLOADS_DIR = os.path.join(PROJECT_ROOT, "uploads")
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 
-MAX_FILE_BYTES = 30 * 1024 * 1024
 
-# ============================================================
-# THREAD-SAFE GENERATION PROGRESS TRACKER
-# ============================================================
-_gen_lock     = threading.Lock()
-_gen_progress = {"current": 0, "total": 0, "active": False}
-
-def _reset_progress():
-    with _gen_lock:
-        _gen_progress.update({"current": 0, "total": 0, "active": False})
-
-def _tick_progress(current: int, total: int):
-    with _gen_lock:
-        _gen_progress.update({"current": current, "total": total, "active": True})
-
-
-# ============================================================
-# HELPER: Parse topics_json — supports both old (list) and
-#         new (dict with _cilos key) formats.
-# ============================================================
-def _parse_topics_json(raw_json: str):
-    """
-    Returns (topics: list, cilos: list).
-    Supports:
-      - Old format: JSON array  -> cilos = []
-      - New format: {"_cilos": [...], "topics": [...]}
-    """
-    try:
-        data = json.loads(raw_json or "[]")
-    except Exception:
-        return [], []
-
-    if isinstance(data, list):
-        return data, []
-    if isinstance(data, dict):
-        topics = data.get("topics") or []
-        cilos  = data.get("_cilos") or []
-        return topics, cilos
-    return [], []
-
-
-def _dump_topics_json(topics: list, cilos: list) -> str:
-    """Serialise topics + cilos into the new format."""
-    return json.dumps({"_cilos": cilos, "topics": topics}, ensure_ascii=False)
-
-
-# ============================================================
-# EXTERNAL MODEL + PROGRESS
-# ============================================================
-def call_model_service(expanded_records, test_labels):
-    model_url = os.getenv("AUTO_TOS_MODEL_URL") or current_app.config.get("AUTO_TOS_MODEL_URL")
-    total = len(expanded_records)
-    _tick_progress(0, total)
-
-    if model_url:
-        endpoint = model_url.rstrip("/") + "/generate"
-        try:
-            _poll_stop = threading.Event()
-
-            def _mirror_external_progress():
-                prog_url = model_url.rstrip("/") + "/progress"
-                while not _poll_stop.is_set():
-                    try:
-                        r = requests.get(prog_url, timeout=2)
-                        if r.ok:
-                            d = r.json()
-                            _tick_progress(d.get("current", 0), d.get("total", total))
-                    except Exception:
-                        pass
-                    time.sleep(0.8)
-
-            mirror_thread = threading.Thread(target=_mirror_external_progress, daemon=True)
-            mirror_thread.start()
-
-            resp = requests.post(endpoint, json={"records": expanded_records, "test_labels": test_labels}, timeout=None)
-
-            _poll_stop.set()
-            mirror_thread.join(timeout=2)
-
-            if resp.ok:
-                try:
-                    data = resp.json()
-                    _tick_progress(total, total)
-                    return data
-                except Exception as e:
-                    logger.warning("Failed to parse JSON from model service: %s", e)
-            else:
-                logger.warning("Model service returned %d: %s", resp.status_code, resp.text[:500])
-        except Exception as e:
-            logger.exception("External model service call failed: %s", e)
-
-    try:
-        ai_model = importlib.import_module("ai_model")
-        if hasattr(ai_model, "generate_quiz_item_by_item"):
-            results = []
-            for i, record in enumerate(expanded_records, start=1):
-                results.append(ai_model.generate_quiz_item_by_item(record))
-                _tick_progress(i, total)
-            return {"quizzes": results}
-        local = ai_model.generate_quiz_for_topics(expanded_records, max_items=None, test_labels=test_labels)
-        _tick_progress(total, total)
-        return local
-    except Exception as e:
-        logger.exception("Local model generation failed: %s", e)
-        return None
-
-
-def extract_lesson(data_or_text):
-    model_url = os.getenv("AUTO_TOS_MODEL_URL") or current_app.config.get("AUTO_TOS_MODEL_URL")
-    if model_url:
-        endpoint = model_url.rstrip("/") + "/extract"
-        try:
-            resp = requests.post(endpoint, json={"data": data_or_text}, timeout=None)
-            if resp.ok:
-                payload = resp.json()
-                if isinstance(payload, dict) and "text" in payload:
-                    return payload.get("text") or ""
-                if isinstance(payload, str):
-                    return payload
-        except Exception as e:
-            logger.debug("Remote /extract failed: %s", e)
-    try:
-        ai_model = importlib.import_module("ai_model")
-        return ai_model.lesson_from_upload(data_or_text)
-    except Exception as e:
-        logger.exception("Local lesson_from_upload failed: %s", e)
-        return ""
-
-
-def get_cache_stats():
-    model_url = os.getenv("AUTO_TOS_MODEL_URL") or current_app.config.get("AUTO_TOS_MODEL_URL")
-    timeout   = int(os.getenv("AUTO_TOS_MODEL_TIMEOUT", "5"))
-    if model_url:
-        try:
-            resp = requests.get(model_url.rstrip("/") + "/cache_stats", timeout=timeout)
-            if resp.ok:
-                return resp.json()
-        except Exception:
-            pass
-    try:
-        ai_model = importlib.import_module("ai_model")
-        if hasattr(ai_model, "get_model_cache_stats"):
-            return ai_model.get_model_cache_stats()
-    except Exception:
-        pass
-    return {}
-
-
-# ============================================================
-# POST-PROCESSING
-# ============================================================
-_TF_TASK_VERBS   = re.compile(r'^(convert|calculate|compute|list|draw|design|write|find|determine|show|give an example|describe how|explain how|create a|propose|evaluate|analyze|define|summarize|solve)\b', re.IGNORECASE)
-_TF_WH_QUESTION  = re.compile(r'^(what|which|how|why|who|where|when)\b', re.IGNORECASE)
-
-def _normalize_question(text: str) -> str:
-    t = (text or "").lower().strip()
-    t = re.sub(r'[^\w\s]', '', t)
-    return re.sub(r'\s+', ' ', t)
-
-def _validate_tf_question(q: dict) -> bool:
-    answer   = (q.get("answer") or "").strip().upper().rstrip('.')
-    if answer not in ("TRUE", "FALSE"):
-        return False
-    question = (q.get("question") or "").strip()
-    if _TF_TASK_VERBS.match(question) or _TF_WH_QUESTION.match(question):
-        return False
-    return True
-
-def _deduplicate_quizzes(quizzes: list) -> list:
-    seen, unique, dropped = set(), [], 0
-    for q in quizzes:
-        if not isinstance(q, dict):
-            unique.append(q); continue
-        fp = _normalize_question(q.get("question", ""))[:70]
-        if fp in seen:
-            dropped += 1; continue
-        seen.add(fp); unique.append(q)
-    if dropped:
-        logger.info("Dedup: removed %d duplicate(s).", dropped)
-    return unique
-
-def postprocess_quizzes(quizzes: list) -> list:
-    quizzes = _deduplicate_quizzes(quizzes)
-    for q in quizzes:
-        if not isinstance(q, dict): continue
-        if (q.get("type") or "").lower() in ("tf", "truefalse", "true_false"):
-            if not _validate_tf_question(q):
-                q["_invalid_tf"]  = True
-                q["answer_text"]  = "⚠️ This question was flagged as an invalid True/False statement. Please review or deselect it before saving."
-    return quizzes
-
-
-# ============================================================
-# RECOMPUTE TOS FOR DERIVED EXAMS
-# ============================================================
-def recompute_topics_for_derived(topics_json_str: str, quizzes: list) -> list:
-    BLOOM_TO_CAT = {
-        "Remembering":"fam","Knowledge":"fam",
-        "Understand":"fam","Understanding":"fam",          # ← added Understanding
-        "Applying":"int","Analyzing":"int",
-        "Apply":"int","Analyze":"int","Analysing":"int",   # ← added Analysing
-        "Evaluating":"cre","Creating":"cre",
-        "Evaluate":"cre","Create":"cre",
-    }
-    topics, _ = _parse_topics_json(topics_json_str)
-    if not topics or not quizzes:
-        return topics
-
-    import copy
-    topics    = copy.deepcopy(topics)
-    topic_map = {t["topic"].strip().lower(): t for t in topics}
-
-    for t in topics:
-        t["fam"] = t["int"] = t["cre"] = t["items"] = t["quiz_items"] = 0
-        t["fam_range"] = t["int_range"] = t["cre_range"] = ""
-
-    for q in quizzes:
-        if not isinstance(q, dict): continue
-        concept = (q.get("concept") or "").strip()
-        cat     = BLOOM_TO_CAT.get((q.get("bloom") or "").strip(), "fam")
-        cl      = concept.lower()
-        matched = None
-        if cl in topic_map:
-            matched = topic_map[cl]["topic"]
-        else:
-            for tk, tv in topic_map.items():
-                if cl in tk or tk in cl:
-                    matched = tv["topic"]; break
-        if not matched:
-            matched = topics[0]["topic"]
-        for t in topics:
-            if t["topic"] == matched:
-                t[cat] += 1; t["items"] += 1; t["quiz_items"] += 1; break
-
-    fc = 1
-    ic = sum(t["fam"] for t in topics) + 1
-    cc = sum(t["fam"] + t["int"] for t in topics) + 1
-    for t in topics:
-        for key, cur in [("fam", "fam"), ("int", "int"), ("cre", "cre")]:
-            n = t[key]
-            if key == "fam": start = fc
-            elif key == "int": start = ic
-            else: start = cc
-            if n > 0:
-                e = start + n - 1
-                t[f"{key}_range"] = f"{start}-{e}" if start != e else str(start)
-                if key == "fam": fc = e + 1
-                elif key == "int": ic = e + 1
-                else: cc = e + 1
-            else:
-                t[f"{key}_range"] = "—"
-    return topics
-
-
-# ============================================================
-# DOCX BUILDER
-# ============================================================
-def _build_docx(title, cilos, topics, quizzes, fam_pct, int_pct, cre_pct, total_items):
-    """
-    Build a long bond paper (8.5×13"), Arial, black-and-white DOCX.
-    Contains: CILOs (if any) → TOS table → Exam items.
-    Excludes the title header and subject-type label.
-    """
-    from docx import Document
-    from docx.shared import Pt, Inches, RGBColor
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.enum.table import WD_ALIGN_VERTICAL
-    from docx.oxml.ns import qn
-    from docx.oxml import OxmlElement
-
-    doc = Document()
-
-    # ── Page: long bond paper 8.5 × 13 in ──────────────────
-    sec = doc.sections[0]
-    sec.page_width    = Inches(8.5)
-    sec.page_height   = Inches(13)
-    sec.top_margin    = Inches(1)
-    sec.bottom_margin = Inches(1)
-    sec.left_margin   = Inches(1)
-    sec.right_margin  = Inches(1)
-
-    # ── Default style: Arial 11pt black ─────────────────────
-    normal      = doc.styles['Normal']
-    normal.font.name      = 'Arial'
-    normal.font.size      = Pt(11)
-    normal.font.color.rgb = RGBColor(0, 0, 0)
-
-    # ── Internal helpers ────────────────────────────────────
-    def _run(para, text, bold=False, size=11, italic=False):
-        r = para.add_run(text or '')
-        r.font.name       = 'Arial'
-        r.font.size       = Pt(size)
-        r.font.bold       = bold
-        r.font.italic     = italic
-        r.font.color.rgb  = RGBColor(0, 0, 0)
-        return r
-
-    def add_para(text='', bold=False, size=11,
-                 align=WD_ALIGN_PARAGRAPH.LEFT, italic=False,
-                 space_before=0, space_after=4):
-        p = doc.add_paragraph()
-        p.alignment = align
-        p.paragraph_format.space_before = Pt(space_before)
-        p.paragraph_format.space_after  = Pt(space_after)
-        if text:
-            _run(p, text, bold=bold, size=size, italic=italic)
-        return p
-
-    def cell_write(cell, text, bold=False, size=9,
-                   align=WD_ALIGN_PARAGRAPH.CENTER, italic=False,
-                   valign=WD_ALIGN_VERTICAL.CENTER):
-        """Write multi-line text into a table cell (splits on \\n)."""
-        cell.vertical_alignment = valign
-        lines = (text or '').split('\n')
-
-        # First paragraph (already exists in every new cell)
-        p0 = cell.paragraphs[0]
-        p0.alignment = align
-        p0.paragraph_format.space_before = Pt(1)
-        p0.paragraph_format.space_after  = Pt(1)
-        p0.paragraph_format.left_indent  = Inches(0.05)
-        p0.paragraph_format.right_indent = Inches(0.05)
-        _run(p0, lines[0], bold=bold, size=size, italic=italic)
-
-        for line in lines[1:]:
-            p2 = cell.add_paragraph()
-            p2.alignment = align
-            p2.paragraph_format.space_before = Pt(0)
-            p2.paragraph_format.space_after  = Pt(1)
-            p2.paragraph_format.left_indent  = Inches(0.05)
-            p2.paragraph_format.right_indent = Inches(0.05)
-            _run(p2, line, bold=bold, size=size, italic=italic)
-
-    def shade_cell(cell, hex_color='E0E0E0'):
-        tc   = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        shd  = OxmlElement('w:shd')
-        shd.set(qn('w:val'),   'clear')
-        shd.set(qn('w:color'), 'auto')
-        shd.set(qn('w:fill'),  hex_color)
-        tcPr.append(shd)
-
-    def set_cell_width(cell, twips):
-        tc   = cell._tc
-        tcPr = tc.get_or_add_tcPr()
-        tcW  = OxmlElement('w:tcW')
-        tcW.set(qn('w:w'),    str(twips))
-        tcW.set(qn('w:type'), 'dxa')
-        tcPr.append(tcW)
-
-    def set_table_width(table, twips):
-        tblPr = table._tbl.tblPr
-        tblW  = OxmlElement('w:tblW')
-        tblW.set(qn('w:w'),    str(twips))
-        tblW.set(qn('w:type'), 'dxa')
-        tblPr.append(tblW)
-
-    # ── Column widths (total = 6.5" = 9360 twips) ───────────
-    # 1 inch = 1440 twips
-    COL_W = [
-        int(2.0  * 1440),   # Content Outline  — 2880
-        int(0.65 * 1440),   # Hours            — 936
-        int(1.1  * 1440),   # FAM              — 1584
-        int(1.1  * 1440),   # INT              — 1584
-        int(1.1  * 1440),   # CRE              — 1584
-        int(0.55 * 1440),   # Total            — 792
-    ]  # sum = 9360 ✓
-
-    # ────────────────────────────────────────────────────────
-    # 1. CILOs
-    # ────────────────────────────────────────────────────────
-    if cilos:
-        add_para(
-            'Cognitive Objectives / Behavioral Dimensions / Thinking Skills',
-            bold=True, size=10, align=WD_ALIGN_PARAGRAPH.CENTER,
-            space_before=0, space_after=2
-        )
-        add_para('Intended Learning Outcomes (CILO):', bold=True, size=10,
-                 space_before=2, space_after=3)
-        for i, c in enumerate(cilos, 1):
-            p = doc.add_paragraph()
-            p.paragraph_format.left_indent  = Inches(0.25)
-            p.paragraph_format.space_before = Pt(0)
-            p.paragraph_format.space_after  = Pt(2)
-            _run(p, f'{i}.  {c}', size=10)
-        add_para(space_after=8)
-
-    # ────────────────────────────────────────────────────────
-    # 2. TOS Table
-    # ────────────────────────────────────────────────────────
-    add_para('TABLE OF SPECIFICATION', bold=True, size=11,
-             align=WD_ALIGN_PARAGRAPH.CENTER, space_before=4, space_after=6)
-
-    n_data = len(topics)
-    tbl = doc.add_table(rows=3 + n_data + 1, cols=6)
-    tbl.style = 'Table Grid'
-    set_table_width(tbl, sum(COL_W))
-
-    # Set all cell widths before merging
-    for row in tbl.rows:
-        for ci, cell in enumerate(row.cells):
-            set_cell_width(cell, COL_W[ci])
-
-    # Vertical merge: Content Outline & Hours span all 3 header rows
-    tbl.cell(0, 0).merge(tbl.cell(2, 0))
-    tbl.cell(0, 1).merge(tbl.cell(2, 1))
-
-    # ── Header row 0 ──
-    cell_write(tbl.cell(0, 0), 'CONTENT OUTLINE',
-               bold=True, size=9, align=WD_ALIGN_PARAGRAPH.CENTER)
-    cell_write(tbl.cell(0, 1), 'NUMBER OF\nHOURS SPENT', bold=True, size=9)
-    cell_write(tbl.cell(0, 2),
-               'FAMILIARIZATION\n(Remembering / Understanding)', bold=True, size=9)
-    cell_write(tbl.cell(0, 3),
-               'INTEGRATION\n(Applying / Analyzing)', bold=True, size=9)
-    cell_write(tbl.cell(0, 4),
-               'CREATION\n(Evaluating / Creating)', bold=True, size=9)
-    cell_write(tbl.cell(0, 5), 'TOTAL', bold=True, size=9)
-    for ci in range(6):
-        shade_cell(tbl.cell(0, ci), 'D0D0D0')
-
-    # ── Header row 1 – percentages (cols 0,1 are shadow cells) ──
-    cell_write(tbl.cell(1, 2), f'(Percentage)\n{fam_pct}%', size=9, italic=True)
-    cell_write(tbl.cell(1, 3), f'(Percentage)\n{int_pct}%', size=9, italic=True)
-    cell_write(tbl.cell(1, 4), f'(Percentage)\n{cre_pct}%', size=9, italic=True)
-    cell_write(tbl.cell(1, 5), '100%', size=9, italic=True)
-    for ci in range(2, 6):
-        shade_cell(tbl.cell(1, ci), 'EBEBEB')
-
-    # ── Header row 2 – "Item Numbers" ──
-    cell_write(tbl.cell(2, 2), 'Item Numbers', bold=True, size=9)
-    cell_write(tbl.cell(2, 3), 'Item Numbers', bold=True, size=9)
-    cell_write(tbl.cell(2, 4), 'Item Numbers', bold=True, size=9)
-    cell_write(tbl.cell(2, 5), 'Total No.\nof Items', bold=True, size=9)
-    for ci in range(2, 6):
-        shade_cell(tbl.cell(2, ci), 'EBEBEB')
-
-    # ── Data rows ──
-    t_hrs = t_fam = t_int = t_cre = t_tot = 0
-    for i, t in enumerate(topics):
-        row  = tbl.rows[3 + i]
-        hrs  = t.get('hours') or 0
-        fam  = t.get('fam')   or 0
-        intg = t.get('int')   or 0
-        cre  = t.get('cre')   or 0
-        tot  = t.get('items') or t.get('quiz_items') or 0
-        t_hrs += hrs; t_fam += fam; t_int += intg
-        t_cre += cre; t_tot += tot
-
-        cell_write(row.cells[0], t.get('topic') or '', bold=True, size=10,
-                   align=WD_ALIGN_PARAGRAPH.LEFT)
-        cell_write(row.cells[1], str(hrs),  size=10)
-        cell_write(row.cells[2], t.get('fam_range') or '—', size=10)
-        cell_write(row.cells[3], t.get('int_range') or '—', size=10)
-        cell_write(row.cells[4], t.get('cre_range') or '—', size=10)
-        cell_write(row.cells[5], str(tot),  bold=True, size=10)
-
-    # ── Footer (totals) row ──
-    fr = tbl.rows[3 + n_data]
-    cell_write(fr.cells[0], 'TOTAL:', bold=True, size=10,
-               align=WD_ALIGN_PARAGRAPH.RIGHT)
-    cell_write(fr.cells[1], str(t_hrs), bold=True, size=10)
-    cell_write(fr.cells[2], str(t_fam), bold=True, size=10)
-    cell_write(fr.cells[3], str(t_int), bold=True, size=10)
-    cell_write(fr.cells[4], str(t_cre), bold=True, size=10)
-    cell_write(fr.cells[5], str(t_tot), bold=True, size=10)
-    for ci in range(6):
-        shade_cell(fr.cells[ci], 'D0D0D0')
-
-    add_para(space_after=14)
-
-    # ────────────────────────────────────────────────────────
-    # 3. Exam Items
-    # ────────────────────────────────────────────────────────
-    add_para('EXAM ITEMS', bold=True, size=12,
-             align=WD_ALIGN_PARAGRAPH.CENTER, space_before=6, space_after=8)
-
-    cur_test = ''
-    for idx, q in enumerate(quizzes, 1):
-        if not isinstance(q, dict):
-            continue
-
-        # Test section header (leveled: name — description on same line)
-        hdr  = q.get('test_header')      or ''
-        desc = q.get('test_description') or ''
-        if hdr and hdr != cur_test:
-            cur_test = hdr
-            p_hdr = doc.add_paragraph()
-            p_hdr.paragraph_format.space_before = Pt(10)
-            p_hdr.paragraph_format.space_after  = Pt(4)
-            p_hdr.paragraph_format.keep_with_next = True
-            _run(p_hdr, hdr, bold=True, size=12)
-            if desc:
-                _run(p_hdr, f'   —   {desc}', bold=False, size=11, italic=True)
-            # Underline via paragraph border
-            pPr = p_hdr._p.get_or_add_pPr()
-            pBdr = OxmlElement('w:pBdr')
-            bottom = OxmlElement('w:bottom')
-            bottom.set(qn('w:val'),   'single')
-            bottom.set(qn('w:sz'),    '6')
-            bottom.set(qn('w:space'), '1')
-            bottom.set(qn('w:color'), '000000')
-            pBdr.append(bottom)
-            pPr.append(pBdr)
-
-        qtype = (q.get('type') or '').lower()
-
-        # Question text
-        p_q = doc.add_paragraph()
-        p_q.paragraph_format.space_before   = Pt(4)
-        p_q.paragraph_format.space_after    = Pt(2)
-        p_q.paragraph_format.keep_with_next = True
-        _run(p_q, f'{idx}.  {q.get("question") or ""}', size=11)
-
-        # MCQ choices
-        if qtype == 'mcq' and q.get('choices'):
-            letters = ['a', 'b', 'c', 'd', 'e']
-            ans_l   = (q.get('answer') or '').lower()
-            for ci, choice in enumerate(q['choices'][:5]):
-                letter   = letters[ci]
-                choice_l = (choice or '').lower()
-                is_cor   = ((choice_l == ans_l) or
-                            (ans_l and ans_l in choice_l) or
-                            (ans_l == letter))
-                p_c = doc.add_paragraph()
-                p_c.paragraph_format.left_indent  = Inches(0.35)
-                p_c.paragraph_format.space_before = Pt(1)
-                p_c.paragraph_format.space_after  = Pt(1)
-                _run(p_c, f'{letter})  {choice or ""}', bold=is_cor, size=11)
-
-        elif qtype in ('truefalse', 'tf', 'true_false'):
-            p_tf = doc.add_paragraph()
-            p_tf.paragraph_format.left_indent  = Inches(0.35)
-            p_tf.paragraph_format.space_before = Pt(1)
-            p_tf.paragraph_format.space_after  = Pt(1)
-            _run(p_tf, '(True or False)', italic=True, size=11)
-
-        # Answer line
-        p_ans = doc.add_paragraph()
-        p_ans.paragraph_format.left_indent  = Inches(0.35)
-        p_ans.paragraph_format.space_before = Pt(2)
-        p_ans.paragraph_format.space_after  = Pt(7)
-        _run(p_ans, 'Answer: ', bold=True, size=11)
-        ans_val = q.get('answer') or '—'
-        _run(p_ans, str(ans_val), size=11)
-        if q.get('answer_text') and not q.get('_invalid_tf'):
-            _run(p_ans, f'  ({q["answer_text"]})', italic=True, size=10)
-
-    buf = BytesIO()
-    doc.save(buf)
-    buf.seek(0)
-    return buf
-
-
-# ============================================================
-# GENERATION PROGRESS ROUTE
-# ============================================================
-@dashboard_bp.route("/generation_progress")
-@login_required
-def generation_progress():
-    model_url = os.getenv("AUTO_TOS_MODEL_URL") or current_app.config.get("AUTO_TOS_MODEL_URL")
-    if model_url:
-        try:
-            resp = requests.get(model_url.rstrip("/") + "/progress", timeout=2)
-            if resp.ok:
-                return jsonify(resp.json())
-        except Exception:
-            pass
-    with _gen_lock:
-        return jsonify(dict(_gen_progress))
-
-
-# ============================================================
-# 1. DASHBOARD HOME
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# Decorators
+# ──────────────────────────────────────────────────────────────────────
+def faculty_required(f):
+    """Redirect admins away from faculty-only pages."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if current_user.is_authenticated and current_user.is_admin is True:
+            return redirect(url_for("admin.index"))
+        return f(*args, **kwargs)
+    return wrapper
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Authorisation helpers
+# ──────────────────────────────────────────────────────────────────────
+def _require_owner_or_admin(record: TosRecord) -> bool:
+    return current_user.is_admin or record.user_id == current_user.id
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 1. Home
+# ──────────────────────────────────────────────────────────────────────
 @dashboard_bp.route("/")
 @login_required
 @faculty_required
 def index():
-    records = TosRecord.query.filter_by(user_id=current_user.id).order_by(TosRecord.id.desc()).all()
+    records = (
+        TosRecord.query
+        .filter_by(user_id=current_user.id)
+        .order_by(TosRecord.id.desc())
+        .all()
+    )
     for r in records:
-        if hasattr(r.date_created, 'strftime'):
+        if hasattr(r.date_created, "strftime"):
             r.date_created = r.date_created.strftime("%Y-%m-%d %H:%M:%S")
     return render_template("dashboard.html", records=records)
 
 
-# ============================================================
-# 2. CREATE PAGE
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# 2. Create form
+# ──────────────────────────────────────────────────────────────────────
 @dashboard_bp.route("/create")
 @login_required
 @faculty_required
@@ -636,313 +116,98 @@ def create():
     return render_template("create_tos.html")
 
 
-# ============================================================
-# HELPERS
-# ============================================================
-def parse_range_string(r_str):
-    indices = []
-    if not r_str: return indices
-    for p in r_str.split(","):
-        p = p.strip()
-        if "-" in p:
-            try:
-                s, e = p.split("-"); indices.extend(range(int(s) - 1, int(e)))
-            except Exception: pass
-        elif p.isdigit():
-            try: indices.append(int(p) - 1)
-            except Exception: pass
-    return indices
-
-def _is_large_or_data_url(s, size_threshold=5000):
-    if not s: return False
-    if isinstance(s, str) and s.startswith("data:"): return True
-    try: return len(s) > size_threshold
-    except Exception: return False
-
-def save_data_url_to_file(data_url: str) -> str:
-    if not data_url or not isinstance(data_url, str) or not data_url.startswith("data:"): return None
-    try: header, encoded = data_url.split(",", 1)
-    except Exception: return None
-    ext = ("pdf" if "pdf" in header else "docx" if ("docx" in header or "word" in header)
-           else "pptx" if ("pptx" in header or "presentation" in header)
-           else "txt" if ("plain" in header or "text" in header) else "bin")
-    try: decoded = base64.b64decode(encoded)
-    except Exception as e: logger.warning("base64 decode failed: %s", e); return None
-    if len(decoded) > MAX_FILE_BYTES: return None
-    dest = os.path.join(UPLOADS_DIR, secure_filename(f"{uuid4().hex}.{ext}"))
-    try:
-        with open(dest, "wb") as f: f.write(decoded)
-        return dest
-    except Exception as e:
-        logger.exception("Failed to save upload: %s", e); return None
-
-
-# ============================================================
-# 3. SAVE TOS
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# 3. Save TOS + generate quizzes
+# ──────────────────────────────────────────────────────────────────────
 @dashboard_bp.route("/save_tos", methods=["POST"])
 @login_required
 @faculty_required
 def save_tos():
     data = request.get_json() or {}
 
-    title        = (data.get("title") or "").strip()
+    # ── Parse + validate input ────────────────────────────────
+    title = (data.get("title") or "").strip()
     subject_type = data.get("subjectType", "nonlab")
-    total_quiz   = data.get("totalQuizItems")
-    topics_in    = data.get("topics", []) or []
-    tests_in     = data.get("tests",  []) or []
-    cilos_in     = data.get("cilos",  []) or []
+    cilos = sanitise_cilos(data.get("cilos", []) or [])
 
-    # Sanitise CILOs — keep non-empty strings, max 20, each max 500 chars
-    cilos = [str(c).strip()[:500] for c in cilos_in if str(c).strip()][:20]
-
-    fam_pct = int_pct = cre_pct = None
-    if subject_type == "custom":
-        try:
-            fam_pct = int(data.get("fam_pct", 0))
-            int_pct = int(data.get("int_pct", 0))
-            cre_pct = int(data.get("cre_pct", 0))
-        except Exception:
-            return jsonify({"error": "Custom percentages must be integer values."}), 400
-        if any(x < 0 or x > 100 for x in (fam_pct, int_pct, cre_pct)):
-            return jsonify({"error": "Each custom percentage must be between 0 and 100."}), 400
-        if fam_pct + int_pct + cre_pct != 100:
-            return jsonify({"error": "Custom percentages must sum to exactly 100."}), 400
-
-    if not title:       return jsonify({"error": "Missing TOS title"}), 400
-    if not total_quiz:  return jsonify({"error": "Missing total quiz items"}), 400
     try:
-        total_quiz = int(total_quiz)
-        if total_quiz <= 0: raise ValueError
-    except ValueError:
-        return jsonify({"error": "Total quiz items must be a positive integer"}), 400
+        total_quiz = validate_basic(title, data.get("totalQuizItems"))
+        fam_pct, int_pct, cre_pct = validate_percentages(subject_type, data)
+    except ValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    # ── Validate topics ──────────────────────────────────
-    valid_topics = []
-    for t in topics_in:
-        topic_name = (t.get("topic") or "").strip()
-        try:    hours_val = int(t.get("hours") or 0)
-        except: continue
-        if not topic_name or hours_val <= 0: continue
-
-        raw_lm = t.get("learn_material") or ""
-        stored_lm, lm_truncated, lm_was_file, saved_file_path = "", False, False, None
-        try:
-            if isinstance(raw_lm, str) and raw_lm.startswith("data:"):
-                saved_file_path = save_data_url_to_file(raw_lm)
-                lm_was_file = True
-                extracted   = extract_lesson(raw_lm)
-                if extracted:
-                    stored_lm = extracted[:3000]; lm_truncated = len(extracted) > 3000
-            elif _is_large_or_data_url(raw_lm, 5000):
-                extracted = extract_lesson(raw_lm)
-                if extracted:
-                    stored_lm = extracted[:3000]; lm_truncated = len(extracted) > 3000
-            else:
-                stored_lm = raw_lm if isinstance(raw_lm, str) else str(raw_lm or "")
-                if len(stored_lm) > 3000:
-                    stored_lm = stored_lm[:3000]; lm_truncated = True
-        except Exception as e:
-            logger.warning("learn_material error for %s: %s", topic_name, e)
-            stored_lm = ""; lm_truncated = True
-
-        valid_topics.append({
-            "topic": topic_name, "hours": hours_val,
-            "learn_material": stored_lm,
-            "learn_material_is_truncated": lm_truncated,
-            "learn_material_was_file": lm_was_file,
-            "file_path": saved_file_path,
-            "quiz_items": 0,
-        })
-
-    if not valid_topics:
+    topics = validate_topics(data.get("topics", []) or [], UPLOADS_DIR)
+    if not topics:
         return jsonify({"error": "Add at least one valid topic (name + hours)"}), 400
 
-    # ── Distribute quiz items by hours ───────────────────
-    total_hours = sum(t["hours"] for t in valid_topics)
-    assigned = 0
-    for i, t in enumerate(valid_topics):
-        if i == len(valid_topics) - 1:
-            t["quiz_items"] = total_quiz - assigned
-        else:
-            q = round((t["hours"] / total_hours) * total_quiz)
-            t["quiz_items"] = q; assigned += q
-        t["items"] = t["quiz_items"]
+    # ── Compute quiz counts + Bloom distribution + ranges ─────
+    distribute_quiz_items(topics, total_quiz)
+    apply_bloom_distribution(topics, fam_pct, int_pct, cre_pct)
+    compute_item_ranges(topics)
 
-    # ── Bloom distribution ───────────────────────────────
-    if subject_type == "lab":
-        fam_pct, int_pct, cre_pct = 20, 30, 50
-    elif subject_type != "custom":
-        fam_pct, int_pct, cre_pct = 50, 30, 20
-    fam_pct, int_pct, cre_pct = int(fam_pct), int(int_pct), int(cre_pct)
+    # ── Tests ─────────────────────────────────────────────────
+    try:
+        tests = validate_tests(data.get("tests", []) or [], total_quiz)
+    except ValidationError as exc:
+        return jsonify({"error": str(exc)}), 400
 
-    for t in valid_topics:
-        items = t["items"]
-        fam   = round(items * fam_pct / 100)
-        inte  = round(items * int_pct / 100)
-        cre   = items - (fam + inte)
-        t.update({"fam": fam, "int": inte, "cre": cre,
-                  "fam_range": None, "int_range": None, "cre_range": None,
-                  "fam_pct": fam_pct, "int_pct": int_pct, "cre_pct": cre_pct})
+    test_labels, question_types = build_test_labels(tests, total_quiz)
 
-    # ── Item ranges ──────────────────────────────────────
-    fam_no = 1
-    int_no = sum(t["fam"] for t in valid_topics) + 1
-    cre_no = sum(t["fam"] + t["int"] for t in valid_topics) + 1
-    for t in valid_topics:
-        if t["fam"] > 0:
-            s, e = fam_no, fam_no + t["fam"] - 1
-            t["fam_range"] = f"{s}-{e}" if s != e else str(s); fam_no = e + 1
-        if t["int"] > 0:
-            s, e = int_no, int_no + t["int"] - 1
-            t["int_range"] = f"{s}-{e}" if s != e else str(s); int_no = e + 1
-        if t["cre"] > 0:
-            s, e = cre_no, cre_no + t["cre"] - 1
-            t["cre_range"] = f"{s}-{e}" if s != e else str(s); cre_no = e + 1
+    # ── Build records + generate ──────────────────────────────
+    expanded_records = build_question_slots(topics, total_quiz, question_types)
 
-    # ── Validate tests ───────────────────────────────────
-    tests, total_from_tests = [], 0
-    allowed_types = {"mcq", "truefalse", "open_ended"}
-    for t in tests_in:
-        ttype = (t.get("type") or "").strip()
-        try:    titems = int(t.get("items", 0))
-        except: titems = 0
-        desc = (t.get("description") or "").strip()
-        if ttype not in allowed_types or titems <= 0: continue
-        tests.append({"type": ttype, "items": titems, "description": desc})
-        total_from_tests += titems
-    if tests and total_from_tests != total_quiz:
-        return jsonify({"error": "Test items do not match total quiz count"}), 400
-
-    # ── Test labels ──────────────────────────────────────
-    test_labels, question_types_by_slot = [], []
-    if tests:
-        for i, t in enumerate(tests):
-            label = f"Test {i+1}"
-            for _ in range(t["items"]):
-                test_labels.append(label); question_types_by_slot.append(t["type"])
-    else:
-        test_labels            = ["Test 1"] * total_quiz
-        question_types_by_slot = ["mcq"]    * total_quiz
-
-    # ── Question slots ───────────────────────────────────
-    question_slots = [None] * total_quiz
-    for t in valid_topics:
-        lm = t.get("learn_material"); fp = t.get("file_path"); tn = t["topic"]
-        for idx in parse_range_string(t.get("fam_range", "")):
-            if 0 <= idx < total_quiz: question_slots[idx] = {"topic": tn, "learn_material": lm, "file_path": fp, "bloom": "remembering"}
-        for idx in parse_range_string(t.get("int_range", "")):
-            if 0 <= idx < total_quiz: question_slots[idx] = {"topic": tn, "learn_material": lm, "file_path": fp, "bloom": "applying"}
-        for idx in parse_range_string(t.get("cre_range", "")):
-            if 0 <= idx < total_quiz: question_slots[idx] = {"topic": tn, "learn_material": lm, "file_path": fp, "bloom": "creating"}
-
-    fb = {"topic": valid_topics[0]["topic"], "learn_material": valid_topics[0].get("learn_material"), "file_path": valid_topics[0].get("file_path"), "bloom": "remembering"}
-    for i in range(total_quiz):
-        if question_slots[i] is None: question_slots[i] = fb
-
-    expanded_records = []
-    for i in range(total_quiz):
-        slot  = question_slots[i]
-        qtype = question_types_by_slot[i] if i < len(question_types_by_slot) else "mcq"
-        expanded_records.append({
-            "instruction": "Generate a single exam question strictly from the provided context.",
-            "input": {"concept": slot["topic"], "context": slot.get("learn_material") or "",
-                      "file_path": slot.get("file_path"), "bloom": slot.get("bloom", "Remembering"), "type": qtype}
-        })
-
-    # ── Generate ─────────────────────────────────────────
     try:
         model_result = call_model_service(expanded_records, test_labels)
-    except Exception as e:
-        logger.exception("Generation error: %s", e); _reset_progress()
+    except Exception as exc:
+        logger.exception("Generation error: %s", exc)
+        progress.reset()
         return jsonify({"error": "Internal error generating quiz items."}), 500
 
-    quizzes_data = []
-    if isinstance(model_result, dict) and "quizzes" in model_result:
-        quizzes_data = model_result.get("quizzes") or []
-    elif isinstance(model_result, list):
-        quizzes_data = model_result
-    elif isinstance(model_result, dict):
-        possible = model_result.get("results") or model_result.get("items") or []
-        if isinstance(possible, list): quizzes_data = possible
-
-    if not quizzes_data:
-        _reset_progress()
+    quizzes = _extract_quizzes_from_result(model_result)
+    if not quizzes:
+        progress.reset()
         return jsonify({"error": "Failed to generate quiz items."}), 500
 
-    # ── Inject test headers ──────────────────────────────
+    # ── Attach test headers + postprocess ─────────────────────
     desc_map = {f"Test {i+1}": t.get("description", "") for i, t in enumerate(tests)}
-    for i, q in enumerate(quizzes_data):
-        if isinstance(q, dict):
-            hdr = test_labels[i] if i < len(test_labels) else (q.get("test_header") or "Test 1")
-            q["test_header"] = hdr
-            if hdr in desc_map: q["test_description"] = desc_map[hdr]
+    for i, q in enumerate(quizzes):
+        if not isinstance(q, dict):
+            continue
+        header = test_labels[i] if i < len(test_labels) else q.get("test_header") or "Test 1"
+        q["test_header"] = header
+        if header in desc_map:
+            q["test_description"] = desc_map[header]
 
-    quizzes_data = postprocess_quizzes(quizzes_data)
-    test_labels  = [q.get("test_header", "Test 1") for q in quizzes_data]
+    quizzes = postprocess_quizzes(quizzes)
 
-    # ── Save to DB ───────────────────────────────────────
+    # ── Persist ───────────────────────────────────────────────
+    topic_dicts = [t.to_dict() for t in topics]
     try:
-        topics_json_safe  = _dump_topics_json(valid_topics, cilos)
-        quizzes_json_safe = json.dumps(quizzes_data, ensure_ascii=False)
-
-        MAX_TOPICS_JSON  = 60_000
-        MAX_QUIZZES_JSON = 60_000
-
-        if len(topics_json_safe) > MAX_TOPICS_JSON:
-            for t in valid_topics:
-                t["learn_material"] = (t.get("learn_material") or "")[:500]
-                t["learn_material_is_truncated"] = True
-            topics_json_safe = _dump_topics_json(valid_topics, cilos)
-
-        if len(quizzes_json_safe) > MAX_QUIZZES_JSON:
-            trimmed = []
-            for q in quizzes_data:
-                if not isinstance(q, dict): continue
-                q_trim = {k: q.get(k) for k in ("type","concept","bloom","test_header","test_description")}
-                q_trim["question"]    = (q.get("question")    or "")[:800]
-                q_trim["answer"]      = (q.get("answer")      or "")[:200]
-                q_trim["answer_text"] = (q.get("answer_text") or "")[:300]
-                choices = q.get("choices") or []
-                q_trim["choices"] = [str(c)[:300] for c in choices][:4] if isinstance(choices, list) and len(json.dumps(choices)) < 1000 else []
-                trimmed.append(q_trim)
-            quizzes_json_safe = json.dumps(trimmed, ensure_ascii=False)
-            if len(quizzes_json_safe) > MAX_QUIZZES_JSON:
-                quizzes_json_safe = quizzes_json_safe[:MAX_QUIZZES_JSON]
-
         tos = TosRecord(
-            user_id      = current_user.id,
-            title        = title,
-            topics_json  = topics_json_safe,
-            quizzes_json = quizzes_json_safe,
-            total_items  = total_quiz,
-            date_created = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            subject_type = subject_type,
+            user_id=current_user.id,
+            title=title,
+            topics_json=prepare_persisted_topics_json(topic_dicts, cilos),
+            quizzes_json=prepare_persisted_quizzes_json(quizzes),
+            total_items=total_quiz,
+            date_created=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            subject_type=subject_type,
         )
-        db.session.add(tos); db.session.commit()
-    except Exception as e:
-        db.session.rollback(); logger.exception("DB save error: %s", e); _reset_progress()
+        db.session.add(tos)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("DB save error: %s", exc)
+        progress.reset()
         return jsonify({"error": "Database error while saving TOS."}), 500
 
-    preview_html = ""
-    try:
-        preview_html = render_template(
-            "partials/quiz_preview.html",
-            title        = title,
-            subject_type = subject_type,
-            quizzes      = quizzes_data,
-            total_items  = total_quiz,
-            topics       = valid_topics,
-            cilos        = cilos,
-            fam_pct      = fam_pct,
-            int_pct      = int_pct,
-            cre_pct      = cre_pct,
-            master_id    = tos.id,   # ← passed so the preview can render a download link
-        )
-    except Exception as e:
-        logger.exception("Failed to render quiz preview template: %s", e)
+    # ── Build preview (best-effort; failure non-fatal) ────────
+    preview_html = _render_preview(
+        title=title, subject_type=subject_type, quizzes=quizzes,
+        total_quiz=total_quiz, topics=topic_dicts, cilos=cilos,
+        fam_pct=fam_pct, int_pct=int_pct, cre_pct=cre_pct, master_id=tos.id,
+    )
 
-    _reset_progress()
+    progress.reset()
 
     return jsonify({
         "title":        title,
@@ -952,30 +217,53 @@ def save_tos():
         "int_pct":      int_pct,
         "cre_pct":      cre_pct,
         "totalQuiz":    total_quiz,
-        "totalHours":   total_hours,
-        "topics":       valid_topics,
+        "totalHours":   sum(t.hours for t in topics),
+        "topics":       topic_dicts,
         "cilos":        cilos,
         "tests":        tests,
-        "quizzes":      quizzes_data,
+        "quizzes":      quizzes,
         "cache_stats":  get_cache_stats() or {},
         "preview_html": preview_html,
-        "redirect_url": url_for('dashboard.index'),
+        "redirect_url": url_for("dashboard.index"),
     })
 
 
-# ============================================================
-# 3b. SAVE SELECTED
-# ============================================================
+def _extract_quizzes_from_result(result: Any) -> List[dict]:
+    """Coerce the model service's response into a list of quiz dicts."""
+    if isinstance(result, dict):
+        if "quizzes" in result:
+            return result.get("quizzes") or []
+        maybe = result.get("results") or result.get("items")
+        if isinstance(maybe, list):
+            return maybe
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def _render_preview(**ctx) -> str:
+    try:
+        return render_template("partials/quiz_preview.html", **ctx)
+    except Exception as exc:
+        logger.exception("Failed to render quiz preview template: %s", exc)
+        return ""
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 3b. Save selected subset
+# ──────────────────────────────────────────────────────────────────────
 @dashboard_bp.route("/save_selected", methods=["POST"])
 @login_required
 @faculty_required
 def save_selected():
-    data             = request.get_json() or {}
-    parent_id        = data.get("parent_id")
-    selected_indices = data.get("selected_indices", [])
+    data = request.get_json() or {}
+    parent_id = data.get("parent_id")
+    selected = data.get("selected_indices") or []
 
-    if not parent_id:        return jsonify({"error": "Missing parent record ID."}), 400
-    if not selected_indices: return jsonify({"error": "No questions selected."}), 400
+    if not parent_id:
+        return jsonify({"error": "Missing parent record ID."}), 400
+    if not selected:
+        return jsonify({"error": "No questions selected."}), 400
 
     parent = TosRecord.query.get_or_404(parent_id)
     if parent.user_id != current_user.id:
@@ -983,74 +271,76 @@ def save_selected():
 
     try:
         all_quizzes = json.loads(parent.quizzes_json or "[]")
-    except Exception:
+    except json.JSONDecodeError:
         return jsonify({"error": "Could not load quiz data from parent record."}), 500
 
-    selected_quizzes = [all_quizzes[i - 1] for i in selected_indices if 0 <= i - 1 < len(all_quizzes)]
-    if not selected_quizzes:
+    picked = [
+        all_quizzes[i - 1]
+        for i in selected
+        if 0 <= i - 1 < len(all_quizzes)
+    ]
+    if not picked:
         return jsonify({"error": "None of the selected indices matched valid questions."}), 400
-
-    _, parent_cilos = _parse_topics_json(parent.topics_json or "[]")
 
     try:
         new_record = TosRecord(
-            user_id      = current_user.id,
-            title        = parent.title + " (Selected)",
-            topics_json  = parent.topics_json,
-            quizzes_json = json.dumps(selected_quizzes, ensure_ascii=False),
-            total_items  = len(selected_quizzes),
-            date_created = datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            subject_type = getattr(parent, 'subject_type', 'nonlab') or 'nonlab',
-            is_derived   = True,
-            parent_id    = parent.id,
+            user_id=current_user.id,
+            title=parent.title + " (Selected)",
+            topics_json=parent.topics_json,
+            quizzes_json=json.dumps(picked, ensure_ascii=False),
+            total_items=len(picked),
+            date_created=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            subject_type=getattr(parent, "subject_type", "nonlab") or "nonlab",
+            is_derived=True,
+            parent_id=parent.id,
         )
-        db.session.add(new_record); db.session.commit()
-    except Exception as e:
-        db.session.rollback(); logger.exception("DB error in save_selected: %s", e)
+        db.session.add(new_record)
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("DB error in save_selected: %s", exc)
         return jsonify({"error": "Database error while saving selected items."}), 500
 
     return jsonify({
-        "total_items":  len(selected_quizzes),
+        "total_items":  len(picked),
         "record_id":    new_record.id,
         "redirect_url": url_for("dashboard.index"),
     })
 
 
-# ============================================================
-# 4. VIEW RECORD
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# 4. View record
+# ──────────────────────────────────────────────────────────────────────
+def _load_for_display(record: TosRecord) -> Tuple[List[dict], List[str], List[dict], int, Tuple[int, int, int]]:
+    """Return (topics, cilos, quizzes, total_items, (fam, int, cre))."""
+    topics, cilos = parse_topics_json(record.topics_json)
+
+    quizzes: List[dict] = []
+    if record.quizzes_json:
+        try:
+            quizzes = json.loads(record.quizzes_json)
+        except json.JSONDecodeError:
+            pass
+
+    if record.is_derived and quizzes:
+        topics = recompute_topics_for_derived(record.topics_json, quizzes)
+
+    total_items = len(quizzes) if record.is_derived else (record.total_items or 0)
+    fam, int_, cre = extract_bloom_percentages(
+        topics, getattr(record, "subject_type", "nonlab") or "nonlab",
+    )
+    return topics, cilos, quizzes, total_items, (fam, int_, cre)
+
+
 @dashboard_bp.route("/view/<int:id>")
 @login_required
-def view_tos(id):
+def view_tos(id: int):
     record = TosRecord.query.get_or_404(id)
-    if not current_user.is_admin and record.user_id != current_user.id:
+    if not _require_owner_or_admin(record):
         flash("You do not have permission to view this.", "error")
         return redirect(url_for("dashboard.index"))
 
-    topics_data, cilos = _parse_topics_json(record.topics_json)
-
-    quizzes_data = []
-    if hasattr(record, 'quizzes_json') and record.quizzes_json:
-        try: quizzes_data = json.loads(record.quizzes_json)
-        except Exception: pass
-
-    if record.is_derived and quizzes_data:
-        topics_data = recompute_topics_for_derived(record.topics_json, quizzes_data)
-
-    total_items = len(quizzes_data) if record.is_derived else (record.total_items or 0)
-
-    # Always use the *configured* Bloom percentages — never back-calculate from
-    # actual item counts (rounding on small totals skews the displayed %).
-    # Topics store fam_pct/int_pct/cre_pct from the original save; fall back to
-    # subject_type defaults only for legacy records that predate this field.
-    if topics_data and topics_data[0].get("fam_pct") is not None:
-        fam_pct = int(topics_data[0]["fam_pct"])
-        int_pct = int(topics_data[0]["int_pct"])
-        cre_pct = int(topics_data[0]["cre_pct"])
-    else:
-        stype = getattr(record, 'subject_type', 'nonlab') or 'nonlab'
-        if stype == 'lab': fam_pct, int_pct, cre_pct = 20, 30, 50
-        else:              fam_pct, int_pct, cre_pct = 50, 30, 20
+    topics, cilos, quizzes, total_items, (fam_pct, int_pct, cre_pct) = _load_for_display(record)
 
     parent_record = None
     if record.is_derived and record.parent_id:
@@ -1058,97 +348,218 @@ def view_tos(id):
 
     return render_template(
         "view_tos.html",
-        record        = record,
-        topics        = topics_data,
-        quizzes       = quizzes_data,
-        cilos         = cilos,
-        parent_record = parent_record,
-        fam_pct       = fam_pct,
-        int_pct       = int_pct,
-        cre_pct       = cre_pct,
-        total_items   = total_items,
+        record=record,
+        topics=topics,
+        quizzes=quizzes,
+        cilos=cilos,
+        parent_record=parent_record,
+        fam_pct=fam_pct,
+        int_pct=int_pct,
+        cre_pct=cre_pct,
+        total_items=total_items,
     )
 
 
-# ============================================================
-# 5. DOWNLOAD DOCX
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# 5. Download DOCX
+# ──────────────────────────────────────────────────────────────────────
+_FILENAME_SAFE_RE = re.compile(r"[^\w\s-]")
+
+
+def _safe_filename(title: str) -> str:
+    clean = _FILENAME_SAFE_RE.sub("", title or "").strip().replace(" ", "_")[:60]
+    return f"{clean or 'TOS'}.docx"
+
+
 @dashboard_bp.route("/download_docx/<int:id>")
 @login_required
-def download_docx(id):
+def download_docx(id: int):
     record = TosRecord.query.get_or_404(id)
-    if not current_user.is_admin and record.user_id != current_user.id:
+    if not _require_owner_or_admin(record):
         flash("You do not have permission to download this.", "error")
         return redirect(url_for("dashboard.index"))
 
-    topics_data, cilos = _parse_topics_json(record.topics_json)
-
-    quizzes_data = []
-    if record.quizzes_json:
-        try: quizzes_data = json.loads(record.quizzes_json)
-        except Exception: pass
-
-    if record.is_derived and quizzes_data:
-        topics_data = recompute_topics_for_derived(record.topics_json, quizzes_data)
-
-    total_items = len(quizzes_data) if record.is_derived else (record.total_items or 0)
-
-    if topics_data and topics_data[0].get("fam_pct") is not None:
-        fam_pct = int(topics_data[0]["fam_pct"])
-        int_pct = int(topics_data[0]["int_pct"])
-        cre_pct = int(topics_data[0]["cre_pct"])
-    else:
-        stype = getattr(record, 'subject_type', 'nonlab') or 'nonlab'
-        if stype == 'lab': fam_pct, int_pct, cre_pct = 20, 30, 50
-        else:              fam_pct, int_pct, cre_pct = 50, 30, 20
+    topics, cilos, quizzes, total_items, (fam_pct, int_pct, cre_pct) = _load_for_display(record)
 
     try:
-        buf = _build_docx(
-            title       = record.title,
-            cilos       = cilos,
-            topics      = topics_data,
-            quizzes     = quizzes_data,
-            fam_pct     = fam_pct,
-            int_pct     = int_pct,
-            cre_pct     = cre_pct,
-            total_items = total_items,
+        buf = build_docx(
+            title=record.title, cilos=cilos, topics=topics,
+            quizzes=quizzes, fam_pct=fam_pct, int_pct=int_pct,
+            cre_pct=cre_pct, total_items=total_items,
         )
-    except Exception as e:
-        logger.exception("DOCX generation failed: %s", e)
+    except Exception as exc:
+        logger.exception("DOCX generation failed: %s", exc)
         flash("Failed to generate DOCX file.", "error")
         return redirect(url_for("dashboard.view_tos", id=id))
 
-    safe_title = re.sub(r'[^\w\s-]', '', record.title).strip().replace(' ', '_')[:60]
-    filename   = f"{safe_title or 'TOS'}.docx"
-
     return send_file(
-        buf,
-        as_attachment  = True,
-        download_name  = filename,
-        mimetype       = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        buf, as_attachment=True, download_name=_safe_filename(record.title),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
 
-# ============================================================
-# 6. DELETE RECORD
-# ============================================================
+# ──────────────────────────────────────────────────────────────────────
+# 6. Delete
+# ──────────────────────────────────────────────────────────────────────
 @dashboard_bp.route("/delete/<int:id>")
 @login_required
-def delete_tos(id):
+def delete_tos(id: int):
     record = TosRecord.query.get_or_404(id)
-    if not current_user.is_admin and record.user_id != current_user.id:
+    if not _require_owner_or_admin(record):
         flash("You do not have permission to delete this.", "error")
         return redirect(url_for("dashboard.index"))
+
     try:
         child_count = TosRecord.query.filter_by(parent_id=record.id).count()
         TosRecord.query.filter_by(parent_id=record.id).delete(synchronize_session=False)
         db.session.flush()
-        db.session.delete(record); db.session.commit()
-        msg = f"Deleted '{record.title}' and {child_count} derived exam(s) successfully." if child_count else f"Deleted '{record.title}' successfully."
+        db.session.delete(record)
+        db.session.commit()
+
+        msg = (
+            f"Deleted '{record.title}' and {child_count} derived exam(s) successfully."
+            if child_count else
+            f"Deleted '{record.title}' successfully."
+        )
         flash(msg, "success")
-    except Exception as e:
-        db.session.rollback(); logger.exception("delete_tos failed: %s", e)
-        flash(f"Error deleting record: {e}", "error")
-    if current_user.is_admin:
-        return redirect(url_for("admin.records"))
-    return redirect(url_for("dashboard.index"))
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("delete_tos failed: %s", exc)
+        flash(f"Error deleting record: {exc}", "error")
+
+    target = "admin.records" if current_user.is_admin else "dashboard.index"
+    return redirect(url_for(target))
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 7. Generation progress (remote-first, local fallback)
+# ──────────────────────────────────────────────────────────────────────
+@dashboard_bp.route("/generation_progress")
+@login_required
+def generation_progress():
+    remote = fetch_remote_progress()
+    if remote is not None:
+        return jsonify(remote)
+    return jsonify(progress.snapshot())
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 8. Profile — view
+# ──────────────────────────────────────────────────────────────────────
+@dashboard_bp.route("/profile", methods=["GET"])
+@login_required
+@faculty_required
+def profile():
+    """Render the user's profile page with TOS stats."""
+    user_id = current_user.id
+
+    # ── Aggregate TOS stats for this user ──
+    user_records = TosRecord.query.filter_by(user_id=user_id).all()
+    master_count  = sum(1 for r in user_records if not r.is_derived)
+    derived_count = sum(1 for r in user_records if r.is_derived)
+    total_items   = sum(
+        (r.total_items or 0)
+        for r in user_records
+        if not r.is_derived  # only count master items, derived are subsets
+    )
+
+    # ── Joined date (date_created is stored as a 'YYYY-MM-DD' string) ──
+    joined_on = current_user.date_created or "—"
+    try:
+        joined_on = datetime.strptime(joined_on[:10], "%Y-%m-%d").strftime("%B %d, %Y")
+    except (ValueError, TypeError):
+        pass
+
+    stats = {
+        "master_count":  master_count,
+        "derived_count": derived_count,
+        "total_items":   total_items,
+        "joined_on":     joined_on,
+    }
+
+    return render_template("profile.html", stats=stats)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 9. Profile — update name
+# ──────────────────────────────────────────────────────────────────────
+@dashboard_bp.route("/profile/update", methods=["POST"])
+@login_required
+@faculty_required
+def update_profile():
+    """Update the user's display name. Username is immutable."""
+    name = (request.form.get("name") or "").strip()
+
+    # ── Validation ──
+    if not name:
+        flash("Name cannot be empty.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    if len(name) > 120:
+        flash("Name is too long (max 120 characters).", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    if name == current_user.name:
+        flash("No changes to save.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    # ── Update ──
+    try:
+        user = User.query.get(current_user.id)
+        user.name = name
+        db.session.commit()
+        flash("Profile updated successfully.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("Profile update failed: %s", exc)
+        flash("Could not update profile. Please try again.", "error")
+
+    return redirect(url_for("dashboard.profile"))
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 10. Profile — change password
+# ──────────────────────────────────────────────────────────────────────
+@dashboard_bp.route("/profile/change-password", methods=["POST"])
+@login_required
+@faculty_required
+def change_password():
+    """Verify current password, then update to new password."""
+    current_pw = request.form.get("current_password") or ""
+    new_pw     = request.form.get("new_password") or ""
+    confirm_pw = request.form.get("confirm_new_password") or ""
+
+    # ── Validation ──
+    if not current_pw or not new_pw or not confirm_pw:
+        flash("All password fields are required.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    if new_pw != confirm_pw:
+        flash("New password and confirmation do not match.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    if len(new_pw) < 6:
+        flash("New password must be at least 6 characters.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    # ── Verify current password (uses werkzeug — match your signup) ──
+    if not check_password_hash(current_user.password, current_pw):
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    if new_pw == current_pw:
+        flash("New password must be different from current password.", "error")
+        return redirect(url_for("dashboard.profile"))
+
+    # ── Update ──
+    try:
+        user = User.query.get(current_user.id)
+        user.password = generate_password_hash(new_pw)
+        db.session.commit()
+        flash("Password updated successfully.", "success")
+    except Exception as exc:
+        db.session.rollback()
+        logger.exception("Password change failed: %s", exc)
+        flash("Could not update password. Please try again.", "error")
+
+    return redirect(url_for("dashboard.profile"))

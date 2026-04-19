@@ -1,9 +1,25 @@
+{# ─────────────────────────────────────────────────────────────
+   Signup — subtle polish, flash-fix (honors saved theme so
+   there's no jarring switch after logging in)
+   ───────────────────────────────────────────────────────────── #}
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AutoTOS – Create Account</title>
+
+{# ══ Theme-aware FOUC prevention — same pattern as login.html ══ #}
+<script>
+(function(){
+    try {
+        var t = localStorage.getItem('autotos-theme') || 'light';
+        document.documentElement.style.backgroundColor = t === 'dark' ? '#0f172a' : '#ffffff';
+        document.documentElement.style.colorScheme = t;
+    } catch(e) {}
+})();
+</script>
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -23,9 +39,13 @@
     --radius:    10px;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, sans-serif; color: var(--text); }
+html, body {
+    height: 100%; overflow: hidden;
+    font-family: 'DM Sans', system-ui, sans-serif; color: var(--text);
+}
+body { animation: fadeIn 0.3s ease both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-/* ── Layout ── */
 .auth-wrap { display: flex; width: 100vw; height: 100vh; overflow: hidden; }
 
 /* ── Left panel ── */
@@ -48,12 +68,7 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
     border: 1px solid rgba(255,255,255,0.05); border-radius: 50%; pointer-events: none;
 }
 
-/* Logo — top, in flow */
-.bp-logo {
-    position: relative; z-index: 1;
-    display: flex; align-items: center; gap: 12px;
-    flex-shrink: 0;
-}
+.bp-logo { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .bp-logo-mark {
     width: 44px; height: 44px; background: var(--blue); border-radius: 11px;
     display: flex; align-items: center; justify-content: center;
@@ -62,14 +77,11 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .bp-logo-text { font-family: 'DM Serif Display', serif; font-size: 24px; color: white; }
 .bp-logo-text span { color: #60a5fa; }
 
-/* Hero — fills remaining space, centers content */
 .bp-hero {
-    position: relative; z-index: 1;
-    flex: 1;
+    position: relative; z-index: 1; flex: 1;
     display: flex; flex-direction: column;
     justify-content: center; align-items: center;
-    text-align: center;
-    margin-top: -60px;
+    text-align: center; margin-top: -60px;
 }
 .bp-headline {
     font-family: 'DM Serif Display', serif;
@@ -90,10 +102,8 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .bp-step-text { font-size: 14px; color: #cbd5e1; line-height: 1.5; text-align: left; }
 .bp-step-text strong { color: #e2e8f0; font-weight: 600; }
 
-/* Footer — bottom, in flow */
 .bp-footer {
-    position: relative; z-index: 1;
-    flex-shrink: 0;
+    position: relative; z-index: 1; flex-shrink: 0;
     font-size: 12px; color: #475569;
     border-top: 1px solid rgba(255,255,255,0.07); padding-top: 20px;
 }
@@ -120,9 +130,14 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
 .flash-msg {
     padding: 11px 14px; border-radius: 8px; font-size: 13px; font-weight: 500;
     margin-bottom: 20px; display: flex; align-items: center; gap: 8px;
+    animation: slideDown 0.3s ease both;
 }
 .flash-msg.error   { background: var(--error-bg);   color: var(--error);   border: 1px solid #fecaca; }
 .flash-msg.success { background: var(--success-bg); color: var(--success); border: 1px solid #bbf7d0; }
+@keyframes slideDown {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
 
 .field { margin-bottom: 18px; }
 .field label { display: block; font-size: 13px; font-weight: 600; color: var(--navy); margin-bottom: 7px; }
@@ -208,38 +223,32 @@ html, body { height: 100%; overflow: hidden; font-family: 'DM Sans', system-ui, 
       {% endwith %}
 
       <form action="/signup" method="POST">
-    <div class="field">
-        <label for="name">Full Name</label>
-        <input type="text" id="name" name="name" 
-               placeholder="e.g. Prof. Jane Santos" required>
-    </div>
-
-    <div class="field">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" 
-               placeholder="e.g. jsantos" required autocomplete="username">
-    </div>
-
-    <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" 
-               placeholder="Minimum 6 characters" required oninput="checkStrength(this.value)">
-        <div class="pw-strength">
+        <div class="field">
+          <label for="name">Full Name</label>
+          <input type="text" id="name" name="name" placeholder="e.g. Prof. Jane Santos" required>
+        </div>
+        <div class="field">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" placeholder="e.g. jsantos" required autocomplete="username">
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password"
+                 placeholder="Minimum 6 characters" required oninput="checkStrength(this.value)">
+          <div class="pw-strength">
             <div class="pw-bar" id="pb1"></div>
             <div class="pw-bar" id="pb2"></div>
             <div class="pw-bar" id="pb3"></div>
             <div class="pw-bar" id="pb4"></div>
+          </div>
         </div>
-    </div>
-
-    <div class="field">
-        <label for="confirm_password">Confirm Password</label>
-        <input type="password" id="confirm_password" name="confirm_password" 
-               placeholder="Repeat your password" required>
-    </div>
-
-    <button class="btn-primary" type="submit">Create Account</button>
-</form>
+        <div class="field">
+          <label for="confirm_password">Confirm Password</label>
+          <input type="password" id="confirm_password" name="confirm_password"
+                 placeholder="Repeat your password" required>
+        </div>
+        <button class="btn-primary" type="submit">Create Account</button>
+      </form>
 
       <div class="form-footer">Already have an account? <a href="/login">Sign in</a></div>
       <p class="terms-note">By registering, you confirm this account is for faculty use only.</p>

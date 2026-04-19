@@ -43,10 +43,11 @@ class User(db.Model, UserMixin):
         return str(self.id)
 
     def __repr__(self):
-        return f"<User {self.email} admin={self.is_admin} active={self.active}>"
+        return f"<User {self.username} admin={self.is_admin} active={self.active}>"
 
 
-class TosRecord(db.Model):
+
+class TosRecord(db.Model):  
     """
     A generated Table of Specification (TOS) record.
 

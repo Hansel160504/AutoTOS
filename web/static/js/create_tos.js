@@ -46,6 +46,161 @@ document.addEventListener("DOMContentLoaded", () => {
     if (percentValidationMsg) percentValidationMsg.style.display = "none";
 
     // ================================================================
+    // FILE PREVIEW SYSTEM
+    // ================================================================
+    // Each topic row gets a hidden <input type="file"> + custom UI.
+    // When user picks a file, we display name/size + Open/Clear buttons.
+    // "Open" creates a blob URL and opens in new tab — works for PDFs
+    // and images natively; DOCX/PPTX get downloaded so user can verify
+    // in their default app.
+
+    /** File-type icon by extension */
+    function fileIcon(filename) {
+        const ext = (filename.split('.').pop() || '').toLowerCase();
+        const map = {
+            pdf:  '📕',
+            doc:  '📘', docx: '📘',
+            ppt:  '📙', pptx: '📙',
+            txt:  '📄', md: '📄',
+            png:  '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', webp: '🖼️',
+        };
+        return map[ext] || '📎';
+    }
+
+    /** Pretty-format file size */
+    function formatSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+    }
+
+    /** Per-row blob URL — keep reference so we can revoke on clear/replace */
+    function clearBlobUrl(row) {
+        const url = row.dataset.previewUrl;
+        if (url) {
+            URL.revokeObjectURL(url);
+            delete row.dataset.previewUrl;
+        }
+    }
+
+    /** Wire up a single file-input cell. Idempotent. */
+    function wireFileCell(row) {
+        const input    = row.querySelector('.learnFile');
+        const pickBtn  = row.querySelector('.file-pick-btn');
+        const meta     = row.querySelector('.file-meta');
+        const nameEl   = row.querySelector('.file-meta-name');
+        const sizeEl   = row.querySelector('.file-meta-size');
+        const iconEl   = row.querySelector('.file-meta-icon');
+        const openBtn  = row.querySelector('.file-preview-btn');
+        const clearBtn = row.querySelector('.file-clear-btn');
+if (openBtn) openBtn.style.display = 'none'; // hidden until a previewable file is chosen
+        if (!input || !pickBtn) return;
+        if (input.dataset.wired === '1') return;
+        input.dataset.wired = '1';
+
+        // Click on "Choose file…" → open native picker
+        pickBtn.addEventListener('click', () => input.click());
+
+        // File chosen
+        input.addEventListener('change', () => {
+            const file = input.files && input.files[0];
+            clearBlobUrl(row);
+
+            if (!file) {
+                pickBtn.classList.remove('has-file');
+                pickBtn.innerHTML = '📎 Choose file…';
+                if (meta) meta.classList.remove('show');
+                const previewExts = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md'];
+const fileExt = (file.name.split('.').pop() || '').toLowerCase();
+if (openBtn) openBtn.style.display = previewExts.includes(fileExt) ? '' : 'none';
+                return;
+            }
+
+            pickBtn.classList.add('has-file');
+            pickBtn.innerHTML = '✓ Replace file…';
+            if (iconEl) iconEl.textContent = fileIcon(file.name);
+            if (nameEl) {
+                nameEl.textContent = file.name;
+                nameEl.title = file.name;
+            }
+            if (sizeEl) sizeEl.textContent = formatSize(file.size);
+            if (meta)   meta.classList.add('show');
+
+            // Pre-create the blob URL — preview button is now ready instantly
+            row.dataset.previewUrl = URL.createObjectURL(file);
+        });
+
+        // "👁 Open" — open blob URL in new tab
+       // "👁 Open" — show inline preview modal
+if (openBtn) {
+    openBtn.addEventListener('click', () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const url = row.dataset.previewUrl || URL.createObjectURL(file);
+        row.dataset.previewUrl = url;
+
+        const modal    = document.getElementById('filePreviewModal');
+        const body     = document.getElementById('filePreviewBody');
+        const title    = document.getElementById('filePreviewTitle');
+        const fallback = document.getElementById('filePreviewFallback');
+        const dlLink   = document.getElementById('filePreviewDownload');
+        if (!modal || !body) return;
+
+        title.textContent = file.name;
+        body.innerHTML    = '';
+        fallback.style.display = 'none';
+
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        const previewable = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'txt', 'md'];
+
+        if (previewable.includes(ext)) {
+            if (['png','jpg','jpeg','gif','webp'].includes(ext)) {
+                // Image: show <img>
+                const img = document.createElement('img');
+                img.src = url;
+                img.style.cssText = 'max-width:100%; max-height:100%; object-fit:contain; padding:16px;';
+                body.appendChild(img);
+            } else {
+                // PDF / txt / md: show in iframe
+                const iframe = document.createElement('iframe');
+                iframe.src = url;
+                iframe.style.cssText = 'width:100%; height:100%; border:none; flex:1; display:block;';
+                body.style.display = 'block';
+                body.appendChild(iframe);
+            }
+        } else {
+            // DOCX / PPTX etc. — show download fallback
+            body.style.display = 'none';
+            fallback.style.display = 'flex';
+            if (dlLink) { dlLink.href = url; dlLink.download = file.name; }
+        }
+
+        modal.style.display = 'flex';
+        document.body.style.overflow = 'hidden';
+    });
+}
+
+        // "✕" — clear selection
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                clearBlobUrl(row);
+                input.value = ''; // reset so re-picking same file fires change
+                pickBtn.classList.remove('has-file');
+                pickBtn.innerHTML = '📎 Choose file…';
+                if (meta) meta.classList.remove('show');
+                if (openBtn) openBtn.style.display = 'none'; // ← ADD THIS
+            });
+        }
+    }
+
+    /** Wire all currently-rendered file cells */
+    function wireAllFileCells() {
+        tosTable.querySelectorAll('tbody tr').forEach(wireFileCell);
+    }
+
+    wireAllFileCells();
+
+    // ================================================================
     // PROGRESS INDICATOR
     // ================================================================
     let _progressTotal = 10;
@@ -154,6 +309,22 @@ document.addEventListener("DOMContentLoaded", () => {
         getFragmentCBs().forEach(cb => { cb.checked = state; highlightFragmentItem(cb); });
         updateFragmentCount();
     }
+    // ── Inline file preview modal close ──
+const filePreviewModal = document.getElementById('filePreviewModal');
+const filePreviewClose = document.getElementById('filePreviewClose');
+if (filePreviewClose && filePreviewModal) {
+    filePreviewClose.addEventListener('click', () => {
+        filePreviewModal.style.display = 'none';
+        document.body.style.overflow   = '';
+        // clear iframe src to stop any embedded content
+        const body = document.getElementById('filePreviewBody');
+        if (body) body.innerHTML = '';
+    });
+    // also close on backdrop click
+    filePreviewModal.addEventListener('click', (e) => {
+        if (e.target === filePreviewModal) filePreviewClose.click();
+    });
+}
 
     // ================================================================
     // STATIC BUTTON LISTENERS
@@ -276,7 +447,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (subjectTypeSelect) { subjectTypeSelect.addEventListener('change', updateCustomUI); updateCustomUI(); }
 
     // ================================================================
-    // TOPIC TABLE
+    // TOPIC TABLE — add row now includes the file-cell markup
     // ================================================================
     addRowBtn.onclick = () => {
         const tbody = tosTable.querySelector("tbody");
@@ -284,14 +455,33 @@ document.addEventListener("DOMContentLoaded", () => {
         row.innerHTML = `
             <td><input type="text" placeholder="e.g. Deep Learning" class="topicName"></td>
             <td><input type="number" value="3" min="1" class="topicHours" style="width:80px;"></td>
-            <td><input type="file" class="learnFile"></td>
+            <td class="file-cell">
+                <div class="file-input-wrap">
+                    <input type="file" class="learnFile" accept=".pdf,.docx,.pptx,.txt,.md">
+                    <button type="button" class="file-pick-btn">📎 Choose file…</button>
+                    <div class="file-meta">
+                        <span class="file-meta-icon">📄</span>
+                        <span class="file-meta-name">—</span>
+                        <span class="file-meta-size">—</span>
+                        <div class="file-actions">
+                            <button type="button" class="file-action-btn file-preview-btn" title="Preview file">👁 Open</button>
+                            <button type="button" class="file-action-btn danger file-clear-btn" title="Clear selection">✕</button>
+                        </div>
+                    </div>
+                </div>
+            </td>
             <td><button type="button" class="btn secondary remove">Remove</button></td>
         `;
         tbody.appendChild(row);
+        wireFileCell(row);
     };
 
     tosTable.addEventListener("click", (e) => {
-        if (e.target.classList.contains("remove")) e.target.closest("tr").remove();
+        if (e.target.classList.contains("remove")) {
+            const row = e.target.closest("tr");
+            clearBlobUrl(row);  // free memory
+            row.remove();
+        }
     });
 
     const toBase64 = (file) => new Promise((res, rej) => {
@@ -366,6 +556,11 @@ document.addEventListener("DOMContentLoaded", () => {
     // ================================================================
     if (cancelGenerationBtn) {
         cancelGenerationBtn.onclick = () => {
+            const confirmed = confirm(
+                "Cancel generation?\n\nAny questions generated so far will be lost."
+            );
+            if (!confirmed) return;
+
             if (abortController) { abortController.abort(); abortController = null; }
             resetProgress();
             if (loadingOverlay) loadingOverlay.style.display = 'none';
@@ -411,15 +606,13 @@ document.addEventListener("DOMContentLoaded", () => {
         const subjectType = subjectTypeSelect ? subjectTypeSelect.value : 'nonlab';
         const totalQuiz   = parseInt(document.getElementById("totalQuizItemsInput").value, 10);
 
-        // ── Collect CILOs ──
         const cilos = (typeof window.getCilos === 'function') ? window.getCilos() : [];
 
         const topics = [];
         for (const row of Array.from(tosTable.querySelectorAll("tbody tr"))) {
-            const inputs     = row.querySelectorAll("input");
-            const topicName  = inputs[0] ? inputs[0].value.trim() : '';
-            const hoursValue = parseInt(inputs[1] ? inputs[1].value : '0', 10);
-            const fileInput  = inputs[2];
+            const topicName  = row.querySelector('.topicName')  ? row.querySelector('.topicName').value.trim() : '';
+            const hoursValue = row.querySelector('.topicHours') ? parseInt(row.querySelector('.topicHours').value, 10) : 0;
+            const fileInput  = row.querySelector('.learnFile');
             if (!topicName || !hoursValue || hoursValue <= 0) continue;
             let b64 = null;
             if (fileInput && fileInput.files && fileInput.files[0]) {
