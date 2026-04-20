@@ -311,6 +311,13 @@ table#tosTable thead th {
     background: var(--bg-thead); border-bottom: 1px solid var(--border-col);
     text-align: left; color: var(--text-sub);
 }
+table#tosTable thead th:nth-child(3) {
+    text-align: center;
+}
+table#tosTable tbody td.file-cell {
+    text-align: center;
+    vertical-align: middle;
+}
 table#tosTable tbody td {
     padding: 8px 10px; border-bottom: 1px solid var(--border-col); vertical-align: middle;
 }
@@ -327,25 +334,28 @@ table#tosTable input:focus { border-color: var(--blue); }
 
 /* ══ NEW: Custom file input + preview UI ══ */
 .file-cell { padding: 6px 8px; }
+/* AFTER */
 .file-input-wrap {
     position: relative;
-    display: flex; flex-direction: column; gap: 8px;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
 }
 .file-input-wrap input[type="file"] {
     /* Hide native input but keep it interactive */
     position: absolute; opacity: 0; width: 0; height: 0; pointer-events: none;
 }
+
+/* AFTER */
 .file-pick-btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    padding: 7px 10px;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 10px 14px;
+    width: 100%;        
+    min-height: 42px;   /* ← ADD */                /* ← full column width */
     border: 1.5px dashed var(--border-col); border-radius: 7px;
     background: var(--bg-file); color: var(--text-sub);
-    font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 500;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
     cursor: pointer; user-select: none;
     transition: border-color 0.12s, color 0.12s, background 0.12s;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    max-width: 100%;
-    min-width: 0;
 }
 .file-pick-btn:hover {
     border-color: var(--blue); color: var(--blue); background: var(--blue-light);
@@ -355,11 +365,15 @@ table#tosTable input:focus { border-color: var(--blue); }
     border-style: solid; border-color: var(--green);
     background: var(--green-light); color: var(--green);
 }
+/* AFTER */
+/* AFTER */
 .file-meta {
-    display: none; align-items: center; gap: 6px;
+    display: none; align-items: center; justify-content: center; gap: 6px;
     padding: 5px 8px; background: var(--bg-thead);
     border: 1px solid var(--border-col); border-radius: 6px;
     font-size: 11px; color: var(--text-sub);
+    min-height: 42px;   /* ← ADD */
+    width: 100%;   /* ← fills the cell so centering applies */
 }
 .file-meta.show { display: flex; }
 .file-meta-icon { font-size: 14px; flex-shrink: 0; }

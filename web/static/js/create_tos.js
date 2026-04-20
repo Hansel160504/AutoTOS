@@ -116,8 +116,8 @@ if (openBtn) openBtn.style.display = previewExts.includes(fileExt) ? '' : 'none'
                 return;
             }
 
-            pickBtn.classList.add('has-file');
-            pickBtn.innerHTML = '✓ Replace file…';
+    // AFTER — just hide it; ✕ is enough to replace/clear
+pickBtn.style.display = 'none';
             if (iconEl) iconEl.textContent = fileIcon(file.name);
             if (nameEl) {
                 nameEl.textContent = file.name;
@@ -181,16 +181,17 @@ if (openBtn) {
 }
 
         // "✕" — clear selection
-        if (clearBtn) {
-            clearBtn.addEventListener('click', () => {
-                clearBlobUrl(row);
-                input.value = ''; // reset so re-picking same file fires change
-                pickBtn.classList.remove('has-file');
-                pickBtn.innerHTML = '📎 Choose file…';
-                if (meta) meta.classList.remove('show');
-                if (openBtn) openBtn.style.display = 'none'; // ← ADD THIS
-            });
-        }
+       // AFTER
+if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+        clearBlobUrl(row);
+        input.value = '';
+        pickBtn.classList.remove('has-file');
+        pickBtn.style.display = '';   // ← restore the pick button
+        if (meta) meta.classList.remove('show');
+        if (openBtn) openBtn.style.display = 'none';
+    });
+}
     }
 
     /** Wire all currently-rendered file cells */

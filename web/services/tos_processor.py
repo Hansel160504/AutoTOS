@@ -488,6 +488,11 @@ def postprocess_quizzes(quizzes: List[dict]) -> List[dict]:
                     "⚠️ This question was flagged as an invalid True/False statement. "
                     "Please review or deselect it before saving."
                 )
+            # ── Capitalize for display — validation already passed using .lower() ──
+            ans = (q.get("answer") or "").strip().lower()
+            if ans in ("true", "false"):
+                q["answer"] = ans.capitalize()   # "true" → "True", "false" → "False"
+
     return quizzes
 
 
