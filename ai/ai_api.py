@@ -5,10 +5,6 @@ from starlette.concurrency import run_in_threadpool
 from typing import List, Dict, Any, Optional
 import logging
 
-# Import everything (including Progress) from the shim so all symbols
-# resolve to the same autotos.generator module object. Importing Progress
-# via `from ai.autotos.generator import Progress` creates a second, separate
-# class instance — Progress.tick() in generation would never affect its counter.
 from ai.ai_model import (
     generate_quiz_for_topics,
     lesson_from_upload,
@@ -17,7 +13,7 @@ from ai.ai_model import (
 )
 
 logger = logging.getLogger(__name__)
-app = FastAPI(title="AutoTOS AI Service", version="1.4")
+app = FastAPI(title="AutoTOS AI Service", version="1.5")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -36,9 +32,6 @@ class ExtractRequest(BaseModel):
     data: str
 
 
-# ── Lightweight endpoints: async so they run on the event loop ────────
-# and are never queued behind the blocking /generate thread pool call.
-
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "autotos-ai"}
@@ -55,13 +48,8 @@ async def cache_stats():
 
 @app.get("/progress")
 async def generation_progress():
-    # Progress.snapshot() is microseconds of work (one lock + dict copy).
-    # Safe on the event loop, and now reads the SAME Progress instance
-    # that generate_from_records calls .tick() on.
     return Progress.snapshot()
 
-
-# ── Blocking endpoints: offloaded to thread pool ──────────────────────
 
 @app.post("/extract")
 async def extract_text(req: ExtractRequest):
@@ -77,6 +65,14 @@ async def extract_text(req: ExtractRequest):
 async def generate(req: GenerateRequest):
     if not isinstance(req.records, list) or len(req.records) == 0:
         raise HTTPException(status_code=400, detail="records must be a non-empty list")
+
+    # ── Reset progress immediately on request arrival ──────────────────
+    # Closes the gap between request arrival and thread pool execution.
+    # Without this, the previous generation's final state ({current:50,
+    # total:50}) leaks into the new generation's Analyze phase, causing
+    # the frontend to briefly flash the old count before correcting.
+    Progress.reset(len(req.records))
+
     try:
         result = await run_in_threadpool(
             lambda: generate_quiz_for_topics(
