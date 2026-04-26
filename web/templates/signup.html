@@ -22,7 +22,13 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- AFTER: add media="print" onload trick to load async -->
+<link rel="preload" as="style"
+    href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap"
+    onload="this.onload=null;this.rel='stylesheet'">
+<noscript>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</noscript>
 <style>
 :root {
     --navy-deep: #111f33;
@@ -115,7 +121,7 @@ body { animation: fadeIn 0.3s ease both; }
     display: flex; align-items: center; justify-content: center;
     padding: 40px;
 }
-.form-card { width: 100%; max-width: 420px; animation: slideUp 0.4s ease both; }
+.form-card { width: 100%; max-width: 420px; animation: slideUp 0.15s ease both; }
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }

@@ -22,7 +22,13 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<!-- AFTER: add media="print" onload trick to load async -->
+<link rel="preload" as="style"
+    href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap"
+    onload="this.onload=null;this.rel='stylesheet'">
+<noscript>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</noscript>
 <style>
 :root {
     --navy: #1a2e4a; --navy-deep: #111f33; --blue: #2563eb; --blue-light: #dbeafe;
@@ -64,7 +70,7 @@ html, body {
 body {
     background: var(--bg-page);
     transition: background-color 0.2s ease, color 0.2s ease;
-    animation: fadeIn 0.25s ease both;
+    animation: fadeIn 0.05s ease both;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
