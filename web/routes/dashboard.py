@@ -438,9 +438,12 @@ def delete_tos(id: int):
 @login_required
 def generation_progress():
     remote = fetch_remote_progress()
-    if remote is not None:
-        return jsonify(remote)
-    return jsonify(progress.snapshot())
+    payload = remote if remote is not None else progress.snapshot()
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    response.headers["Pragma"]        = "no-cache"
+    response.headers["Expires"]       = "0"
+    return response
 
 
 # ──────────────────────────────────────────────────────────────────────

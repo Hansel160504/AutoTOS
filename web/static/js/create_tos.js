@@ -219,11 +219,14 @@ if (clearBtn) {
             if (ap >= 100) { clearInterval(analyzeTimer); setStep('generate'); _startPolling(); }
         }, 40);
     }
-
+q
     function _startPolling() {
         progressInterval = setInterval(async () => {
             try {
-                const resp = await fetch('/dashboard/generation_progress', { cache: 'no-store' });
+                const resp = await fetch('/dashboard/generation_progress?_=' + Date.now(), {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+                });
                 if (!resp.ok) return;
                 const data = await resp.json();
                 const current = data.current || 0;
