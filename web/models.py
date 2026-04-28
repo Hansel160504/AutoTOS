@@ -1,6 +1,7 @@
 from extensions import db
 from flask_login import UserMixin
 from datetime import datetime
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 
 
 class User(db.Model, UserMixin):
@@ -16,7 +17,7 @@ class User(db.Model, UserMixin):
 
     id           = db.Column(db.Integer, primary_key=True)
     name         = db.Column(db.String(120), nullable=False)
-    username     = db.Column(db.String(80), unique=True, nullable=False)  # ← replaces email
+    username     = db.Column(db.String(80), unique=True, nullable=False)
     password     = db.Column(db.String(256), nullable=False)
 
     is_admin     = db.Column(db.Boolean, default=False, nullable=False)
@@ -47,23 +48,27 @@ class User(db.Model, UserMixin):
 
 
 
-class TosRecord(db.Model):  
+class TosRecord(db.Model):
     """
     A generated Table of Specification (TOS) record.
 
     Master records hold the full question bank.
     Derived records are subsets saved via 'Save Selected'.
+
+    NOTE: topics_json and quizzes_json use MEDIUMTEXT (16 MB max) so the
+    app can store large multi-topic exams with full learn_material and
+    50-100 item question banks. Plain TEXT (the default) is only 64 KB.
     """
     __tablename__ = "tos_records"
 
     id           = db.Column(db.Integer, primary_key=True)
     user_id      = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     title        = db.Column(db.String(255), nullable=False)
-    topics_json  = db.Column(db.Text, default="[]")
-    quizzes_json = db.Column(db.Text, default="[]")
+    topics_json  = db.Column(MEDIUMTEXT, default="[]")    # was db.Text (64 KB)
+    quizzes_json = db.Column(MEDIUMTEXT, default="[]")    # was db.Text (64 KB)
     total_items  = db.Column(db.Integer, default=0)
     date_created = db.Column(db.String(50))
-    subject_type = db.Column(db.String(20), default='nonlab')  # ← ADD THIS
+    subject_type = db.Column(db.String(20), default='nonlab')
     # ── Master / Derived relationship ──
     is_derived   = db.Column(db.Boolean, default=False, nullable=False)
     parent_id    = db.Column(db.Integer, db.ForeignKey("tos_records.id"), nullable=True)

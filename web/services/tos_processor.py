@@ -25,16 +25,26 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────
 # Limits
 # ──────────────────────────────────────────────────────────────────────
-MAX_FILE_BYTES       = 30 * 1024 * 1024
-MAX_TOPICS_JSON      = 60_000
-MAX_QUIZZES_JSON     = 60_000
+# Raised from 30 MB → 100 MB. Users can upload larger PDFs / PPTX now.
+# Note: Flask MAX_CONTENT_LENGTH must also be raised (in web/config.py).
+MAX_FILE_BYTES       = 100 * 1024 * 1024
+
+# JSON-storage caps — bumped to take advantage of MEDIUMTEXT (16 MB) DB columns.
+# Was 60_000 bytes (fit in TEXT 64KB column). Now 1 MB per JSON column.
+# Allows large 50-100 item exams + many topics with full learn_material.
+MAX_TOPICS_JSON      = 1_000_000
+MAX_QUIZZES_JSON     = 1_000_000
+
+# Per-topic learn_material cap. Kept at 3000 chars — matches num_ctx 1536.
+# Raising this risks truncation at the model context boundary.
 LEARN_MATERIAL_LIMIT = 3_000
+
 DATA_URL_SIZE_HINT   = 5_000
 MAX_CILOS            = 20
 CILO_MAX_CHARS       = 500
 ALLOWED_TEST_TYPES   = frozenset({
     "mcq", "truefalse", "open_ended",          # from legacy dashboard forms
-    "MCQ", "True_False", "Open_Ended",          # v31 canonical names
+    "MCQ", "True_False", "Open_Ended",          # v34 canonical names
 })
 
 # ──────────────────────────────────────────────────────────────────────
@@ -126,6 +136,7 @@ def save_data_url_to_file(data_url: str, uploads_dir: str) -> Optional[str]:
         return None
 
     if len(decoded) > MAX_FILE_BYTES:
+        logger.warning("File exceeds MAX_FILE_BYTES (%d MB)", MAX_FILE_BYTES // (1024*1024))
         return None
 
     os.makedirs(uploads_dir, exist_ok=True)

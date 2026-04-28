@@ -30,9 +30,11 @@ CHUNK_CACHE_MAX   = 64       # was unbounded — fixed memory leak
 CACHE_CLEANUP_EVERY = 50
 
 # ── Per-type generation budgets ───────────────────────────────────────
-# v31: richer context (~460 tok avg) + MCQ needs room for 4 full choices
+# v34: prompt token estimates (chars / 3.3):
+#   mean=848, p99=1288, max=1412 → 1536 leaves headroom for output
 NUM_CTX = {"mcq": 1536, "tf": 1536, "open": 1536}
-MAX_TOKENS = {"mcq": 300, "tf": 150, "open": 250}
+# Output budgets — trimmed for ~5-10% speedup. MCQ JSON typically 180-220 tokens.
+MAX_TOKENS = {"mcq": 250, "tf": 120, "open": 220}
 
 # ── Validation thresholds ─────────────────────────────────────────────
 ANSWER_TEXT_MAX_CHARS         = 220
@@ -44,7 +46,7 @@ TF_SEMANTIC_DUP_JACCARD       = 0.55
 MCQ_SUBTOPIC_JACCARD          = 0.50
 
 # ── Type maps (single source of truth) ────────────────────────────────
-# v31 training uses: MCQ, True_False, Open_Ended — all display types
+# v34 training uses: MCQ, True_False, Open_Ended — all display types
 # must match EXACTLY or the model sees unfamiliar tokens at inference.
 TYPE_INTERNAL: dict[str, str] = {
     "mcq": "mcq", "MCQ": "mcq",
